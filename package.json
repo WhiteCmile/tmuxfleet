@@ -1,0 +1,20 @@
+{
+  "name": "tmuxfleet",
+  "version": "0.1.0",
+  "private": true,
+  "description": "A small Hub + Node dashboard for tmux sessions across machines.",
+  "type": "module",
+  "bin": {
+    "tmuxfleet": "./src/cli.js"
+  },
+  "scripts": {
+    "hub": "node src/cli.js hub",
+    "node": "node src/cli.js node",
+    "dev:hub": "node --watch src/cli.js hub",
+    "dev:node": "node --watch src/cli.js node",
+    "check": "node --check src/*.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
