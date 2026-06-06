@@ -271,8 +271,8 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         }
         var ESC=String.fromCharCode(27),BEL=String.fromCharCode(7);
         var SGR={0:[],1:["b"],2:["dim"],3:["i"],4:["u"],30:["c0"],31:["c1"],32:["c2"],33:["c3"],34:["c4"],35:["c5"],36:["c6"],37:["c7"],40:["bg0"],41:["bg1"],42:["bg2"],43:["bg3"],44:["bg4"],45:["bg5"],46:["bg6"],47:["bg7"],90:["c8"],91:["c9"],92:["c10"],93:["c11"],94:["c12"],95:["c13"],96:["c14"],97:["c15"],100:["bg8"],101:["bg9"],102:["bg10"],103:["bg11"],104:["bg12"],105:["bg13"],106:["bg14"],107:["bg15"]};
-        var t=(body.output||"").replace(new RegExp(ESC+"\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\][^"+BEL+"]*"+BEL,"g"),"");
-        var parts=t.split(new RegExp(ESC+"\\[([0-9;]*)m")),out=[],cs=[],ss={},sst="";
+        var t=(body.output||"").replace(new RegExp(ESC+"\\\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\\\][^"+BEL+"]*"+BEL,"g"),"");
+        var parts=t.split(new RegExp(ESC+"\\\\[([0-9;]*)m")),out=[],cs=[],ss={},sst="";
         for (var i=0;i<parts.length;i++) {
           if (i%2===0) {
             if (parts[i]) {
