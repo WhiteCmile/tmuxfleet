@@ -14,6 +14,8 @@ session、创建 session、抓取输出、发送输入，以及在浏览器、Hu
 - 在浏览器里打开某个 session。
 - 支持一个 tmux session 里的多个 window。
 - 向选中的 tmux window 发送单行输入。
+- 可以给选中的 agent session 开启自动恢复：当 tmux 输出里出现 API 或网络连接
+  错误时自动发送 `go on`。
 - 显示终端输出用于排查问题。
 - 停止 tmux sessions。
 
@@ -184,9 +186,14 @@ Hub:
 - `GET /api/sessions/:node/:name/windows`
 - `GET /api/sessions/:node/:name/output?window=0&lines=500`
 - `POST /api/sessions/:node/:name/send`
+- `PUT /api/sessions/:node/:name/autorecover`
 - `GET /api/nodes`
 - `POST /api/nodes`
 - `DELETE /api/nodes/:name`
+
+自动恢复按 session 手动开启。Hub 每 20 秒扫描已开启的 session，检查最近的
+tmux 输出是否命中 API/网络连接错误模式，命中后向配置的 window 发送 `go on`。
+同一条错误指纹不会重复发送；不同错误之间也会冷却 120 秒。
 
 Hub 请求 Node 时使用：
 

@@ -19,7 +19,15 @@ import {
   sendHtml,
   sendJson
 } from "./http.js";
-import { addNode, loadHiddenSessions, loadNodes, removeNode, setSessionHidden } from "./state.js";
+import {
+  addNode,
+  loadAutoRecoverSessions,
+  loadHiddenSessions,
+  loadNodes,
+  removeNode,
+  setSessionAutoRecover,
+  setSessionHidden
+} from "./state.js";
 import { nodeToken } from "./node_server.js";
 
 const AUTH_COOKIE = "tmuxfleet_auth";
@@ -27,8 +35,17 @@ const NODE_NAME_PATTERN = /^[A-Za-z0-9_.:-]{1,80}$/;
 const AGENT_COMMAND_TIMEOUT_MS = 15000;
 const AGENT_POLL_TIMEOUT_MS = 25000;
 const AGENT_ONLINE_MS = 35000;
+const AUTO_RECOVER_INTERVAL_MS = 20000;
+const AUTO_RECOVER_COOLDOWN_MS = 120000;
+const AUTO_RECOVER_ERROR_PATTERNS = [
+  /\bAPI Error\b/i,
+  /\b(?:network|connection)\s+(?:error|failed|failure|lost|reset|refused|timeout|timed out|closed|disconnected)\b/i,
+  /\b(?:error sending request|request failed|failed to fetch|fetch failed|socket hang up)\b/i,
+  /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)\b/
+];
 
 const connectedNodes = new Map();
+const autoRecoverHistory = new Map();
 
 export function startHubServer({ host, port }) {
   ensureHubAuthForBind(host);
@@ -81,13 +98,15 @@ export function startHubServer({ host, port }) {
     const selectedWindow = url.searchParams.get("window") || "";
     const windows = await sessionWindows(node, params.name);
     const output = await sessionOutput(node, params.name, 500, selectedWindow);
+    const autoRecoverConfig = loadAutoRecoverSessions()[`${node.name}/${params.name}`] || null;
     const views = await loadViews();
     sendHtml(res, 200, views.renderSessionPage({
       node,
       name: params.name,
       windows,
       selectedWindow,
-      output
+      output,
+      autoRecoverConfig
     }));
   }));
 
@@ -154,6 +173,17 @@ export function startHubServer({ host, port }) {
     sendJson(res, 200, { status: "ok", hidden });
   }));
 
+  app.add("PUT", "/api/sessions/:node/:name/autorecover", requireHubAuth(async ({ res, params, body }) => {
+    const node = findHubNode(params.node);
+    const payload = await body();
+    const config = setSessionAutoRecover(node.name, params.name, {
+      enabled: !!payload.enabled,
+      window: payload.window || "",
+      message: payload.message || "go on"
+    });
+    sendJson(res, 200, { status: "ok", enabled: !!config, config });
+  }));
+
   app.add("POST", "/api/agent/register", requireAgentAuth(async ({ res, body }) => {
     const payload = await body();
     const entry = touchConnectedNode(payload.name, payload.hostname);
@@ -175,6 +205,8 @@ export function startHubServer({ host, port }) {
   }));
 
   const server = listen(app, host, port);
+  const stopAutoRecoverLoop = startAutoRecoverLoop();
+  server.on("close", stopAutoRecoverLoop);
   console.log(`tmuxfleet hub listening on http://${host}:${port}`);
   return server;
 }
@@ -203,10 +235,12 @@ export async function collectNodeViews() {
     }
   }
   const hiddenSessions = loadHiddenSessions();
+  const autoRecoverSessions = loadAutoRecoverSessions();
   for (const view of views) {
     for (const session of view.sessions) {
       const key = `${view.name}/${session.name}`;
       session.hidden = !!hiddenSessions[key];
+      session.autoRecover = autoRecoverSessions[key] || null;
     }
   }
   return views;
@@ -278,6 +312,82 @@ async function sendNodeMessage(node, name, text, windowIndex = "") {
     text,
     window: windowIndex
   });
+}
+
+function startAutoRecoverLoop() {
+  const timer = setInterval(() => {
+    runAutoRecoverScan().catch((error) => {
+      console.error(`tmuxfleet auto-recover scan error: ${error.message || error}`);
+    });
+  }, AUTO_RECOVER_INTERVAL_MS);
+  const firstScanTimer = setTimeout(() => {
+    runAutoRecoverScan().catch((error) => {
+      console.error(`tmuxfleet auto-recover scan error: ${error.message || error}`);
+    });
+  }, 5000);
+  return () => {
+    clearInterval(timer);
+    clearTimeout(firstScanTimer);
+  };
+}
+
+async function runAutoRecoverScan() {
+  const configs = loadAutoRecoverSessions();
+  const entries = Object.entries(configs);
+  if (!entries.length) return;
+  for (const [key, config] of entries) {
+    const [nodeName, sessionName] = key.split("/");
+    if (!nodeName || !sessionName) continue;
+    await scanAutoRecoverSession(nodeName, sessionName, config);
+  }
+}
+
+async function scanAutoRecoverSession(nodeName, sessionName, config) {
+  let node;
+  try {
+    node = findHubNode(nodeName);
+  } catch {
+    return;
+  }
+  const windowIndex = String(config.window ?? "");
+  const message = String(config.message || "go on");
+  let output = "";
+  try {
+    output = await sessionOutput(node, sessionName, 160, windowIndex);
+  } catch (error) {
+    console.error(`tmuxfleet auto-recover skipped ${nodeName}/${sessionName}: ${error.message || error}`);
+    return;
+  }
+  const fingerprint = autoRecoverFingerprint(output);
+  if (!fingerprint || !looksRecoverableAgentError(output)) return;
+  const historyKey = `${nodeName}/${sessionName}:${windowIndex}`;
+  const previous = autoRecoverHistory.get(historyKey);
+  const now = Date.now();
+  if (previous && previous.fingerprint === fingerprint) {
+    return;
+  }
+  if (previous && now - previous.sentAt < AUTO_RECOVER_COOLDOWN_MS) {
+    return;
+  }
+  await sendNodeMessage(node, sessionName, message, windowIndex);
+  autoRecoverHistory.set(historyKey, { fingerprint, sentAt: now });
+  console.log(`tmuxfleet auto-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}`);
+}
+
+function looksRecoverableAgentError(output) {
+  const tail = String(output || "").slice(-8000);
+  return AUTO_RECOVER_ERROR_PATTERNS.some((pattern) => pattern.test(tail));
+}
+
+function autoRecoverFingerprint(output) {
+  const matchingLines = String(output || "")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .filter((line) => AUTO_RECOVER_ERROR_PATTERNS.some((pattern) => pattern.test(line)))
+    .slice(-3);
+  if (!matchingLines.length) return "";
+  return crypto.createHash("sha1").update(matchingLines.join("\n")).digest("hex");
 }
 
 function loadHubNodes() {

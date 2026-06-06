@@ -16,6 +16,8 @@ and proxies requests between the browser, the Hub, and Nodes.
 - Opens a session in the browser.
 - Supports multiple tmux windows inside one session.
 - Sends one-line input to the selected tmux window.
+- Can auto-recover selected agent sessions by sending `go on` after API or
+  network connection errors appear in tmux output.
 
 - Keeps a raw Terminal view for debugging.
 - Stops tmux sessions.
@@ -190,9 +192,15 @@ Hub:
 - `GET /api/sessions/:node/:name/windows`
 - `GET /api/sessions/:node/:name/output?window=0&lines=500`
 - `POST /api/sessions/:node/:name/send`
+- `PUT /api/sessions/:node/:name/autorecover`
 - `GET /api/nodes`
 - `POST /api/nodes`
 - `DELETE /api/nodes/:name`
+
+Auto-recover is opt-in per session. The Hub scans enabled sessions every 20
+seconds, watches recent tmux output for API/network connection error patterns,
+and sends `go on` to the configured window. The same error fingerprint is not
+sent twice, and different errors are cooled down for 120 seconds between sends.
 
 Hub-to-Node requests use:
 

@@ -54,9 +54,9 @@ export function renderSessionsPage(nodeViews) {
     <section class="panel">
       <h2>当前会话</h2>
       <div class="table-wrap"><table>
-        <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th></th><th></th></tr></thead>
+        <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th>自动恢复</th><th></th><th></th></tr></thead>
         <tbody>
-          ${visible.length ? visible.map(({ node, session }) => renderSessionRow(node, session)).join("") : `<tr><td colspan="7" class="empty">没有可见会话。</td></tr>`}
+          ${visible.length ? visible.map(({ node, session }) => renderSessionRow(node, session)).join("") : `<tr><td colspan="8" class="empty">没有可见会话。</td></tr>`}
         </tbody>
       </table></div>
     </section>
@@ -65,7 +65,7 @@ export function renderSessionsPage(nodeViews) {
       <details class="hidden-sessions">
         <summary><h2 style="display:inline;cursor:pointer;margin-bottom:0">已隐藏 (${hidden.length})</h2></summary>
         <div class="table-wrap" style="margin-top:14px"><table>
-          <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th></th><th></th></tr></thead>
+          <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th>自动恢复</th><th></th><th></th></tr></thead>
           <tbody>${hidden.map(({ node, session }) => renderSessionRow(node, session)).join("")}</tbody>
         </table></div>
       </details>
@@ -224,8 +224,15 @@ function ansiToHtml(text) {
   return spans.join("");
 }
 
-export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output }) {
+export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, autoRecoverConfig = null }) {
   const activeWindow = selectedWindow || String((windows.find((item) => item.active) || windows[0] || {}).index ?? "");
+  const autoRecoverEnabled = !!autoRecoverConfig;
+  const autoRecoverWindow = autoRecoverEnabled ? String(autoRecoverConfig.window ?? "") : "";
+  const autoRecoverOnActiveWindow = autoRecoverEnabled && autoRecoverWindow === activeWindow;
+  const autoRecoverLabel = autoRecoverOnActiveWindow ? "关闭自动恢复" : "开启自动恢复";
+  const autoRecoverStatus = autoRecoverEnabled
+    ? `已开启：window ${autoRecoverWindow || "默认"} · ${autoRecoverConfig.message || "go on"}`
+    : "未开启";
   return page(`${node.name}/${name}`, `
     <section class="hero compact">
       <div>
@@ -239,6 +246,10 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       <div class="window-tabs">
         ${windows.length ? windows.map((windowItem) => renderWindowTab(node, name, windowItem, activeWindow)).join("") : `<span class="muted">没有找到窗口</span>`}
       </div>
+      <div class="terminal-tools">
+        <span id="autorecover-status">${escapeHtml(autoRecoverStatus)}</span>
+        <button id="toggle-autorecover" class="ghost" type="button">${escapeHtml(autoRecoverLabel)}</button>
+      </div>
       <pre id="terminal">${ansiToHtml(output)}</pre>
       <form id="send-message" class="terminal-input">
         <input name="text" autocomplete="off" autofocus placeholder="输入一行内容后按回车">
@@ -250,6 +261,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       const node = ${JSON.stringify(node.name)};
       const name = ${JSON.stringify(name)};
       const activeWindow = ${JSON.stringify(activeWindow)};
+      let autoRecoverOnActiveWindow = ${JSON.stringify(autoRecoverOnActiveWindow)};
       const terminal = document.querySelector("#terminal");
       let autoscroll = true;
 
@@ -337,6 +349,31 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name), {method: "DELETE"});
         location.href = "/sessions";
       });
+      document.querySelector("#toggle-autorecover").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const status = document.querySelector("#autorecover-status");
+        button.disabled = true;
+        status.textContent = autoRecoverOnActiveWindow ? "正在关闭..." : "正在开启...";
+        try {
+          const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/autorecover", {
+            method: "PUT",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({enabled: !autoRecoverOnActiveWindow, window: activeWindow, message: "go on"})
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            status.textContent = body.detail || "更新失败";
+            return;
+          }
+          autoRecoverOnActiveWindow = !autoRecoverOnActiveWindow;
+          button.textContent = autoRecoverOnActiveWindow ? "关闭自动恢复" : "开启自动恢复";
+          status.textContent = autoRecoverOnActiveWindow ? ("已开启：window " + (activeWindow || "默认") + " · go on") : "未开启";
+        } catch (error) {
+          status.textContent = "更新失败：" + (error.message || String(error));
+        } finally {
+          button.disabled = false;
+        }
+      });
       setInterval(refreshOutput, 1000);
       terminal.scrollTop = terminal.scrollHeight;
     </script>
@@ -364,6 +401,7 @@ function renderSessionRow(node, session) {
     <td class="path opt-col">${escapeHtml(session.cwd || "-")}</td>
     <td class="opt-col">${escapeHtml(session.command || "-")}</td>
     <td>${escapeHtml(relativeTime(session.lastUpdated))}</td>
+    <td>${session.autoRecover ? `<span class="pill ok">已开启</span>` : `<span class="muted">-</span>`}</td>
     <td><a class="button-link" href="${href}">打开</a></td>
     <td><button class="ghost toggle-vis" type="button" data-node="${escapeHtml(node.name)}" data-session="${escapeHtml(session.name)}" data-hidden="${session.hidden ? "1" : "0"}" title="${toggleTitle}">${toggleLabel}</button></td>
   </tr>`;
@@ -469,6 +507,7 @@ function styles() {
     .window-tab { min-width: 120px; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--text); display: grid; gap: 2px; text-decoration: none; }
     .window-tab span { color: var(--muted); font-size: 12px; }
     .window-tab.is-active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
+    .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: #fbfcfe; color: var(--muted); }
     #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
     #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
@@ -515,6 +554,8 @@ function styles() {
       .node-badge { padding: 10px; }
       .window-tabs { gap: 6px; padding: 8px 10px; }
       .window-tab { min-width: 90px; padding: 8px 10px; font-size: 13px; }
+      .terminal-tools { align-items: stretch; display: grid; gap: 6px; }
+      .terminal-tools button { width: 100%; }
       #terminal { height: calc(100vh - 180px); min-height: 360px; padding: 12px; font-size: 12px; }
       .terminal-input { gap: 8px; padding: 10px; }
       table { min-width: 360px; }

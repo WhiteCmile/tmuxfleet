@@ -65,6 +65,10 @@ export function hiddenSessionsPath() {
   return path.join(stateDir(), "hidden_sessions.json");
 }
 
+export function autoRecoverSessionsPath() {
+  return path.join(stateDir(), "auto_recover_sessions.json");
+}
+
 export function loadHiddenSessions() {
   try {
     const data = JSON.parse(fs.readFileSync(hiddenSessionsPath(), "utf8"));
@@ -85,6 +89,32 @@ export function setSessionHidden(nodeName, sessionName, hidden) {
   fs.mkdirSync(stateDir(), { recursive: true });
   fs.writeFileSync(hiddenSessionsPath(), JSON.stringify(sessions, null, 2) + "\n");
   return hidden;
+}
+
+export function loadAutoRecoverSessions() {
+  try {
+    const data = JSON.parse(fs.readFileSync(autoRecoverSessionsPath(), "utf8"));
+    return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setSessionAutoRecover(nodeName, sessionName, { enabled, window = "", message = "go on" }) {
+  const key = `${nodeName}/${sessionName}`;
+  const sessions = loadAutoRecoverSessions();
+  if (enabled) {
+    sessions[key] = {
+      window: String(window ?? ""),
+      message: String(message || "go on"),
+      updatedAt: new Date().toISOString()
+    };
+  } else {
+    delete sessions[key];
+  }
+  fs.mkdirSync(stateDir(), { recursive: true });
+  fs.writeFileSync(autoRecoverSessionsPath(), JSON.stringify(sessions, null, 2) + "\n");
+  return sessions[key] || null;
 }
 
 export function findNode(name) {
