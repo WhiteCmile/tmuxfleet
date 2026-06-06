@@ -258,6 +258,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       });
 
       async function refreshOutput() {
+        try {
         const query = new URLSearchParams({lines: "500"});
         if (activeWindow !== "") query.set("window", activeWindow);
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
@@ -299,6 +300,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         if (autoscroll) {
           terminal.scrollTop = terminal.scrollHeight;
         }
+        } catch(e) { /* silently retry next interval */ }
       }
 
       document.querySelector("#send-message").addEventListener("submit", async (event) => {
