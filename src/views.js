@@ -162,6 +162,12 @@ export function renderNodesPage(nodeViews) {
   `);
 }
 
+function palette256(n) {
+  if (n < 16) { const c = ["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n] || "#e4e7ec"; }
+  if (n < 232) { n -= 16; var r = Math.floor(n/36), g = Math.floor((n%36)/6), b = n%6; return "#"+[r?String(55+r*40).padStart(2,"0"):"00", g?String(55+g*40).padStart(2,"0"):"00", b?String(55+b*40).padStart(2,"0"):"00"].join(""); }
+  var v = 8 + (n-232)*10; var h = v.toString(16).padStart(2,"0"); return "#"+h+h+h;
+}
+
 function ansiToHtml(text) {
   text = String(text).replace(/\x1b\[[0-9;?]*[A-Za-ln-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
   const sgr = {
@@ -178,25 +184,38 @@ function ansiToHtml(text) {
   const parts = text.split(/\x1b\[([0-9;]*)m/);
   const spans = [];
   const classes = [];
+  var styles = {}, styleStr = "";
+  function buildStyle() {
+    var p = [];
+    if (styles.fg) p.push("color:"+styles.fg);
+    if (styles.bg) p.push("background:"+styles.bg);
+    styleStr = p.length ? p.join(";") : "";
+  }
   for (let i = 0; i < parts.length; i++) {
     if (i % 2 === 0) {
       if (parts[i]) {
-        spans.push(classes.length
-          ? '<span class="' + classes.join(" ") + '">' + escapeHtml(parts[i]) + '</span>'
+        var spanAttrs = "";
+        if (classes.length) spanAttrs += ' class="' + classes.join(" ") + '"';
+        if (styleStr) spanAttrs += ' style="' + styleStr + '"';
+        spans.push(spanAttrs
+          ? '<span' + spanAttrs + '>' + escapeHtml(parts[i]) + '</span>'
           : escapeHtml(parts[i]));
       }
     } else {
       const codes = parts[i] ? parts[i].split(";").map(Number) : [0];
-      for (const code of codes) {
-        if (code === 0) { classes.length = 0; continue; }
-        if (code === 39) { for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci][0] === "c") classes.splice(ci, 1); } continue; }
-        if (code === 49) { for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci].startsWith("bg")) classes.splice(ci, 1); } continue; }
-        const add = sgr[code];
+      for (var j = 0; j < codes.length; j++) {
+        var c = codes[j];
+        if (c === 0) { classes.length = 0; styles = {}; styleStr = ""; continue; }
+        if (c === 39) { delete styles.fg; for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci][0] === "c") classes.splice(ci, 1); } buildStyle(); continue; }
+        if (c === 49) { delete styles.bg; for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci].startsWith("bg")) classes.splice(ci, 1); } buildStyle(); continue; }
+        if (c === 38 && codes[j+1] === 5 && codes[j+2] != null) { styles.fg = palette256(codes[j+2]); j += 2; buildStyle(); continue; }
+        if (c === 48 && codes[j+1] === 5 && codes[j+2] != null) { styles.bg = palette256(codes[j+2]); j += 2; buildStyle(); continue; }
+        const add = sgr[c];
         if (add) {
-          for (const c of add) {
-            const idx = classes.indexOf(c);
+          for (var k = 0; k < add.length; k++) {
+            var idx = classes.indexOf(add[k]);
             if (idx >= 0) classes.splice(idx, 1);
-            classes.push(c);
+            classes.push(add[k]);
           }
         }
       }
@@ -244,22 +263,35 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
         if (!response.ok) return;
         const body = await response.json();
-        const ESC = String.fromCharCode(27);
-        const BEL = String.fromCharCode(7);
-        const SGR = {0:[],1:["b"],2:["dim"],3:["i"],4:["u"],30:["c0"],31:["c1"],32:["c2"],33:["c3"],34:["c4"],35:["c5"],36:["c6"],37:["c7"],40:["bg0"],41:["bg1"],42:["bg2"],43:["bg3"],44:["bg4"],45:["bg5"],46:["bg6"],47:["bg7"],90:["c8"],91:["c9"],92:["c10"],93:["c11"],94:["c12"],95:["c13"],96:["c14"],97:["c15"],100:["bg8"],101:["bg9"],102:["bg10"],103:["bg11"],104:["bg12"],105:["bg13"],106:["bg14"],107:["bg15"]};
-        var t = (body.output || "").replace(new RegExp(ESC+"\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\][^"+BEL+"]*"+BEL,"g"),"");
-        var parts = t.split(new RegExp(ESC+"\\[([0-9;]*)m")), out = [], cs = [];
-        for (var i = 0; i < parts.length; i++) {
-          if (i % 2 === 0) {
-            if (parts[i]) { var esc = parts[i].replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); out.push(cs.length ? '<span class="'+cs.join(" ")+'">'+esc+'</span>' : esc); }
+        function p256(n) {
+          if (n < 16) { var c=["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n]||"#e4e7ec"; }
+          if (n < 232) { n-=16; var r=Math.floor(n/36),g=Math.floor((n%36)/6),b=n%6; return "#"+[r?String(55+r*40).padStart(2,"0"):"00",g?String(55+g*40).padStart(2,"0"):"00",b?String(55+b*40).padStart(2,"0"):"00"].join(""); }
+          var v=8+(n-232)*10,h=v.toString(16).padStart(2,"0"); return "#"+h+h+h;
+        }
+        var ESC=String.fromCharCode(27),BEL=String.fromCharCode(7);
+        var SGR={0:[],1:["b"],2:["dim"],3:["i"],4:["u"],30:["c0"],31:["c1"],32:["c2"],33:["c3"],34:["c4"],35:["c5"],36:["c6"],37:["c7"],40:["bg0"],41:["bg1"],42:["bg2"],43:["bg3"],44:["bg4"],45:["bg5"],46:["bg6"],47:["bg7"],90:["c8"],91:["c9"],92:["c10"],93:["c11"],94:["c12"],95:["c13"],96:["c14"],97:["c15"],100:["bg8"],101:["bg9"],102:["bg10"],103:["bg11"],104:["bg12"],105:["bg13"],106:["bg14"],107:["bg15"]};
+        var t=(body.output||"").replace(new RegExp(ESC+"\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\][^"+BEL+"]*"+BEL,"g"),"");
+        var parts=t.split(new RegExp(ESC+"\\[([0-9;]*)m")),out=[],cs=[],ss={},sst="";
+        for (var i=0;i<parts.length;i++) {
+          if (i%2===0) {
+            if (parts[i]) {
+              var esc=parts[i].replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
+              var attrs="";
+              if (cs.length) attrs+=' class="'+cs.join(" ")+'"';
+              if (sst) attrs+=' style="'+sst+'"';
+              out.push(attrs ? '<span'+attrs+'>'+esc+'</span>' : esc);
+            }
           } else {
-            var codes = parts[i] ? parts[i].split(";").map(Number) : [0];
-            for (var j = 0; j < codes.length; j++) {
-              if (codes[j] === 0) { cs.length = 0; continue; }
-              if (codes[j] === 39) { cs = cs.filter(function(c){return c[0]!=="c";}); continue; }
-              if (codes[j] === 49) { cs = cs.filter(function(c){return c[0]!=="b"||c[1]!=="g";}); continue; }
-              var add = SGR[codes[j]];
-              if (add) { for (var k = 0; k < add.length; k++) { var idx = cs.indexOf(add[k]); if (idx>=0) cs.splice(idx,1); cs.push(add[k]); } }
+            var codes=parts[i]?parts[i].split(";").map(Number):[0];
+            for (var j=0;j<codes.length;j++) {
+              var cd=codes[j];
+              if (cd===0){cs.length=0;ss={};sst="";continue}
+              if (cd===39){delete ss.fg;cs=cs.filter(function(x){return x[0]!=="c"});sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
+              if (cd===49){delete ss.bg;cs=cs.filter(function(x){return x[0]!=="b"||x[1]!=="g"});sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
+              if (cd===38&&codes[j+1]===5&&codes[j+2]!=null){ss.fg=p256(codes[j+2]);j+=2;sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
+              if (cd===48&&codes[j+1]===5&&codes[j+2]!=null){ss.bg=p256(codes[j+2]);j+=2;sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
+              var add=SGR[cd];
+              if(add){for(var k=0;k<add.length;k++){var idx=cs.indexOf(add[k]);if(idx>=0)cs.splice(idx,1);cs.push(add[k])}}
             }
           }
         }
