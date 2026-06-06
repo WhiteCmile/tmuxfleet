@@ -61,6 +61,32 @@ export function removeNode(name) {
   saveNodes(loadNodes().filter((node) => node.name !== "local" && node.name !== name));
 }
 
+export function hiddenSessionsPath() {
+  return path.join(stateDir(), "hidden_sessions.json");
+}
+
+export function loadHiddenSessions() {
+  try {
+    const data = JSON.parse(fs.readFileSync(hiddenSessionsPath(), "utf8"));
+    return data && typeof data === "object" && !Array.isArray(data) ? data : {};
+  } catch {
+    return {};
+  }
+}
+
+export function setSessionHidden(nodeName, sessionName, hidden) {
+  const key = `${nodeName}/${sessionName}`;
+  const sessions = loadHiddenSessions();
+  if (hidden) {
+    sessions[key] = true;
+  } else {
+    delete sessions[key];
+  }
+  fs.mkdirSync(stateDir(), { recursive: true });
+  fs.writeFileSync(hiddenSessionsPath(), JSON.stringify(sessions, null, 2) + "\n");
+  return hidden;
+}
+
 export function findNode(name) {
   const node = loadNodes().find((item) => item.name === name);
   if (!node) {

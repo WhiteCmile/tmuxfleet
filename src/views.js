@@ -23,11 +23,13 @@ export function page(title, body) {
 
 export function renderSessionsPage(nodeViews) {
   const rows = nodeViews.flatMap((node) => node.sessions.map((session) => ({ node, session })));
+  const visible = rows.filter(({ session }) => !session.hidden);
+  const hidden = rows.filter(({ session }) => session.hidden);
   return page("会话", `
     <section class="hero">
       <div>
         <h1>会话</h1>
-        <p>已配置 ${nodeViews.length} 个节点，共 ${rows.length} 个 tmux 会话。</p>
+        <p>已配置 ${nodeViews.length} 个节点，${visible.length} 个可见会话${hidden.length ? `，${hidden.length} 个已隐藏` : ""}。</p>
       </div>
     </section>
     <section class="grid two">
@@ -51,13 +53,24 @@ export function renderSessionsPage(nodeViews) {
     </section>
     <section class="panel">
       <h2>当前会话</h2>
-      <table>
-        <thead><tr><th>标识</th><th>状态</th><th>目录</th><th>命令</th><th>更新时间</th><th></th></tr></thead>
+      <div class="table-wrap"><table>
+        <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th></th><th></th></tr></thead>
         <tbody>
-          ${rows.length ? rows.map(({ node, session }) => renderSessionRow(node, session)).join("") : `<tr><td colspan="6" class="empty">没有找到会话。</td></tr>`}
+          ${visible.length ? visible.map(({ node, session }) => renderSessionRow(node, session)).join("") : `<tr><td colspan="7" class="empty">没有可见会话。</td></tr>`}
         </tbody>
-      </table>
+      </table></div>
     </section>
+    ${hidden.length ? `
+    <section class="panel">
+      <details class="hidden-sessions">
+        <summary><h2 style="display:inline;cursor:pointer;margin-bottom:0">已隐藏 (${hidden.length})</h2></summary>
+        <div class="table-wrap" style="margin-top:14px"><table>
+          <thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th></th><th></th></tr></thead>
+          <tbody>${hidden.map(({ node, session }) => renderSessionRow(node, session)).join("")}</tbody>
+        </table></div>
+      </details>
+    </section>
+    ` : ""}
     <script>
       document.querySelector("#create-session").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -76,6 +89,21 @@ export function renderSessionsPage(nodeViews) {
         }
         location.href = "/sessions/" + encodeURIComponent(data.node) + "/" + encodeURIComponent(data.name);
       });
+      for (const button of document.querySelectorAll(".toggle-vis")) {
+        button.addEventListener("click", async () => {
+          const node = button.dataset.node;
+          const session = button.dataset.session;
+          const hidden = button.dataset.hidden === "1";
+          button.disabled = true;
+          button.textContent = "...";
+          await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(session) + "/hide", {
+            method: "PUT",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({hidden: !hidden})
+          });
+          location.reload();
+        });
+      }
     </script>
   `);
 }
@@ -101,10 +129,10 @@ export function renderNodesPage(nodeViews) {
       </div>
       <div class="panel">
         <h2>已配置节点</h2>
-        <table>
-          <thead><tr><th>名称</th><th>状态</th><th>地址</th><th>会话数</th><th></th></tr></thead>
+        <div class="table-wrap"><table>
+          <thead><tr><th>名称</th><th>状态</th><th class="opt-col">地址</th><th>会话数</th><th></th></tr></thead>
           <tbody>${nodeViews.map(renderNodeRow).join("")}</tbody>
-        </table>
+        </table></div>
       </div>
     </section>
     <script>
@@ -134,6 +162,49 @@ export function renderNodesPage(nodeViews) {
   `);
 }
 
+function ansiToHtml(text) {
+  text = String(text).replace(/\x1b\[[0-9;?]*[A-Za-ln-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
+  const sgr = {
+    0: [], 1: ["b"], 2: ["dim"], 3: ["i"], 4: ["u"],
+    30: ["c0"], 31: ["c1"], 32: ["c2"], 33: ["c3"],
+    34: ["c4"], 35: ["c5"], 36: ["c6"], 37: ["c7"],
+    40: ["bg0"], 41: ["bg1"], 42: ["bg2"], 43: ["bg3"],
+    44: ["bg4"], 45: ["bg5"], 46: ["bg6"], 47: ["bg7"],
+    90: ["c8"], 91: ["c9"], 92: ["c10"], 93: ["c11"],
+    94: ["c12"], 95: ["c13"], 96: ["c14"], 97: ["c15"],
+    100: ["bg8"], 101: ["bg9"], 102: ["bg10"], 103: ["bg11"],
+    104: ["bg12"], 105: ["bg13"], 106: ["bg14"], 107: ["bg15"]
+  };
+  const parts = text.split(/\x1b\[([0-9;]*)m/);
+  const spans = [];
+  const classes = [];
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 0) {
+      if (parts[i]) {
+        spans.push(classes.length
+          ? '<span class="' + classes.join(" ") + '">' + escapeHtml(parts[i]) + '</span>'
+          : escapeHtml(parts[i]));
+      }
+    } else {
+      const codes = parts[i] ? parts[i].split(";").map(Number) : [0];
+      for (const code of codes) {
+        if (code === 0) { classes.length = 0; continue; }
+        if (code === 39) { for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci][0] === "c") classes.splice(ci, 1); } continue; }
+        if (code === 49) { for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci].startsWith("bg")) classes.splice(ci, 1); } continue; }
+        const add = sgr[code];
+        if (add) {
+          for (const c of add) {
+            const idx = classes.indexOf(c);
+            if (idx >= 0) classes.splice(idx, 1);
+            classes.push(c);
+          }
+        }
+      }
+    }
+  }
+  return spans.join("");
+}
+
 export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output }) {
   const activeWindow = selectedWindow || String((windows.find((item) => item.active) || windows[0] || {}).index ?? "");
   return page(`${node.name}/${name}`, `
@@ -149,15 +220,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       <div class="window-tabs">
         ${windows.length ? windows.map((windowItem) => renderWindowTab(node, name, windowItem, activeWindow)).join("") : `<span class="muted">没有找到窗口</span>`}
       </div>
-      <div class="terminal-toolbar">
-        <div class="view-tabs">
-          <button class="view-tab is-active" type="button" data-view="chat">Chat</button>
-          <button class="view-tab" type="button" data-view="terminal">Terminal</button>
-        </div>
-        <span class="muted">Chat 是从 tmux 输出临时整理出来的视图</span>
-      </div>
-      <div id="chat-view" class="chat-view"></div>
-      <pre id="terminal" class="is-hidden" data-initial-output="${escapeHtml(output)}"></pre>
+      <pre id="terminal">${ansiToHtml(output)}</pre>
       <form id="send-message" class="terminal-input">
         <input name="text" autocomplete="off" autofocus placeholder="输入一行内容后按回车">
         <button type="submit">发送</button>
@@ -169,23 +232,11 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       const name = ${JSON.stringify(name)};
       const activeWindow = ${JSON.stringify(activeWindow)};
       const terminal = document.querySelector("#terminal");
-      const chatView = document.querySelector("#chat-view");
-      const storageKey = "tmuxfleet.sent." + node + "." + name + "." + activeWindow;
-      let sentMessages = loadSentMessages();
-      let pendingSentMessages = [];
-      let latestOutput = terminal.dataset.initialOutput || "";
       let autoscroll = true;
 
-      renderViews(latestOutput);
       terminal.addEventListener("scroll", () => {
         autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
       });
-      chatView.addEventListener("scroll", () => {
-        autoscroll = chatView.scrollTop + chatView.clientHeight >= chatView.scrollHeight - 20;
-      });
-      for (const button of document.querySelectorAll(".view-tab")) {
-        button.addEventListener("click", () => switchView(button.dataset.view));
-      }
 
       async function refreshOutput() {
         const query = new URLSearchParams({lines: "500"});
@@ -193,140 +244,29 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
         if (!response.ok) return;
         const body = await response.json();
-        latestOutput = body.output || "";
-        renderViews(latestOutput);
-        if (autoscroll) {
-          terminal.scrollTop = terminal.scrollHeight;
-          chatView.scrollTop = chatView.scrollHeight;
-        }
-      }
-
-      function renderViews(output) {
-        terminal.textContent = output;
-        renderChat(output);
-      }
-
-      function switchView(view) {
-        const isChat = view !== "terminal";
-        chatView.classList.toggle("is-hidden", !isChat);
-        terminal.classList.toggle("is-hidden", isChat);
-        for (const button of document.querySelectorAll(".view-tab")) {
-          button.classList.toggle("is-active", button.dataset.view === (isChat ? "chat" : "terminal"));
-        }
-        if (autoscroll) {
-          terminal.scrollTop = terminal.scrollHeight;
-          chatView.scrollTop = chatView.scrollHeight;
-        }
-      }
-
-      function renderChat(output) {
-        const messages = buildChatMessages(output);
-        if (!messages.length) {
-          chatView.innerHTML = '<div class="chat-empty">还没有可整理成 Chat 的输出。切到 Terminal 可以看原始内容。</div>';
-          return;
-        }
-        chatView.innerHTML = messages.map(renderMessage).join("");
-      }
-
-      function buildChatMessages(output) {
-        const messages = [];
-        let agentLines = [];
-        const matchedSentMessages = new Set();
-        for (const rawLine of String(output || "").split("\\n")) {
-          const line = cleanTerminalLine(rawLine);
-          if (!line) continue;
-          const sent = matchingSentMessage(line);
-          if (sent) {
-            matchedSentMessages.add(sent);
-            flushAgent();
-            messages.push({role: "user", text: sent});
-            continue;
-          }
-          if (isPromptLine(line) || isShellEcho(line)) continue;
-          agentLines.push(line);
-        }
-        flushAgent();
-        pendingSentMessages = pendingSentMessages.filter((message) => !matchedSentMessages.has(message));
-        for (const message of pendingSentMessages) {
-          messages.push({role: "user", text: message});
-        }
-        return compactMessages(messages).slice(-80);
-
-        function flushAgent() {
-          const text = agentLines.join("\\n").trim();
-          agentLines = [];
-          if (text) messages.push({role: "agent", text});
-        }
-      }
-
-      function renderMessage(message) {
-        const roleLabel = message.role === "user" ? "我" : "Agent";
-        return '<article class="chat-message ' + message.role + '">' +
-          '<div class="chat-role">' + roleLabel + '</div>' +
-          '<div class="chat-bubble">' + escapeHtml(message.text) + '</div>' +
-        '</article>';
-      }
-
-      function compactMessages(messages) {
-        const result = [];
-        for (const message of messages) {
-          const previous = result[result.length - 1];
-          if (previous && previous.role === message.role && message.role === "agent") {
-            previous.text = previous.text + "\\n" + message.text;
+        const ESC = String.fromCharCode(27);
+        const BEL = String.fromCharCode(7);
+        const SGR = {0:[],1:["b"],2:["dim"],3:["i"],4:["u"],30:["c0"],31:["c1"],32:["c2"],33:["c3"],34:["c4"],35:["c5"],36:["c6"],37:["c7"],40:["bg0"],41:["bg1"],42:["bg2"],43:["bg3"],44:["bg4"],45:["bg5"],46:["bg6"],47:["bg7"],90:["c8"],91:["c9"],92:["c10"],93:["c11"],94:["c12"],95:["c13"],96:["c14"],97:["c15"],100:["bg8"],101:["bg9"],102:["bg10"],103:["bg11"],104:["bg12"],105:["bg13"],106:["bg14"],107:["bg15"]};
+        var t = (body.output || "").replace(new RegExp(ESC+"\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\][^"+BEL+"]*"+BEL,"g"),"");
+        var parts = t.split(new RegExp(ESC+"\\[([0-9;]*)m")), out = [], cs = [];
+        for (var i = 0; i < parts.length; i++) {
+          if (i % 2 === 0) {
+            if (parts[i]) { var esc = parts[i].replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;"); out.push(cs.length ? '<span class="'+cs.join(" ")+'">'+esc+'</span>' : esc); }
           } else {
-            result.push({...message});
+            var codes = parts[i] ? parts[i].split(";").map(Number) : [0];
+            for (var j = 0; j < codes.length; j++) {
+              if (codes[j] === 0) { cs.length = 0; continue; }
+              if (codes[j] === 39) { cs = cs.filter(function(c){return c[0]!=="c";}); continue; }
+              if (codes[j] === 49) { cs = cs.filter(function(c){return c[0]!=="b"||c[1]!=="g";}); continue; }
+              var add = SGR[codes[j]];
+              if (add) { for (var k = 0; k < add.length; k++) { var idx = cs.indexOf(add[k]); if (idx>=0) cs.splice(idx,1); cs.push(add[k]); } }
+            }
           }
         }
-        return result;
-      }
-
-      function matchingSentMessage(line) {
-        const trimmed = line.trim();
-        for (let index = sentMessages.length - 1; index >= 0; index -= 1) {
-          const message = sentMessages[index];
-          if (message && trimmed.includes(message)) return message;
+        terminal.innerHTML = out.join("");
+        if (autoscroll) {
+          terminal.scrollTop = terminal.scrollHeight;
         }
-        return "";
-      }
-
-      function cleanTerminalLine(line) {
-        return String(line || "")
-          .replace(/\\u001b\\[[0-9;?]*[ -/]*[@-~]/g, "")
-          .replace(/\\r/g, "")
-          .trimEnd();
-      }
-
-      function isPromptLine(line) {
-        const trimmed = line.trim();
-        return /^(root|[\\w.-]+)@[^\\s]+:.*[#>$]\\s*$/.test(trimmed) ||
-          /^[^\\s]+[#>$]\\s*$/.test(trimmed);
-      }
-
-      function isShellEcho(line) {
-        const trimmed = line.trim();
-        return /^[^\\s].*[#$>]\\s+(printf|echo|cd|ls|pwd|cat|node|npm|python|python3|git|tmux|codex|claude|gemini|opencode|bash)\\b/.test(trimmed);
-      }
-
-      function loadSentMessages() {
-        try {
-          const raw = JSON.parse(localStorage.getItem(storageKey) || "[]");
-          return Array.isArray(raw) ? raw.slice(-80) : [];
-        } catch {
-          return [];
-        }
-      }
-
-      function rememberSentMessage(text) {
-        sentMessages = sentMessages.concat([text]).slice(-80);
-        localStorage.setItem(storageKey, JSON.stringify(sentMessages));
-      }
-
-      function escapeHtml(value) {
-        return String(value)
-          .replaceAll("&", "&amp;")
-          .replaceAll("<", "&lt;")
-          .replaceAll(">", "&gt;")
-          .replaceAll('"', "&quot;");
       }
 
       document.querySelector("#send-message").addEventListener("submit", async (event) => {
@@ -341,13 +281,6 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         input.disabled = true;
         button.disabled = true;
         status.textContent = "正在发送...";
-        pendingSentMessages.push(text);
-        rememberSentMessage(text);
-        renderViews(latestOutput);
-        if (autoscroll) {
-          terminal.scrollTop = terminal.scrollHeight;
-          chatView.scrollTop = chatView.scrollHeight;
-        }
         try {
           const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/send", {
             method: "POST",
@@ -389,13 +322,16 @@ function renderWindowTab(node, sessionName, windowItem, activeWindow) {
 
 function renderSessionRow(node, session) {
   const href = `/sessions/${encodeURIComponent(node.name)}/${encodeURIComponent(session.name)}`;
+  const toggleLabel = session.hidden ? "显示" : "隐藏";
+  const toggleTitle = session.hidden ? "恢复显示此会话" : "隐藏此会话";
   return `<tr>
     <td><a href="${href}">${escapeHtml(node.name)}/${escapeHtml(session.name)}</a></td>
     <td><span class="pill">${escapeHtml(displayStatus(session.status))}</span></td>
-    <td class="path">${escapeHtml(session.cwd || "-")}</td>
-    <td>${escapeHtml(session.command || "-")}</td>
+    <td class="path opt-col">${escapeHtml(session.cwd || "-")}</td>
+    <td class="opt-col">${escapeHtml(session.command || "-")}</td>
     <td>${escapeHtml(relativeTime(session.lastUpdated))}</td>
     <td><a class="button-link" href="${href}">打开</a></td>
+    <td><button class="ghost toggle-vis" type="button" data-node="${escapeHtml(node.name)}" data-session="${escapeHtml(session.name)}" data-hidden="${session.hidden ? "1" : "0"}" title="${toggleTitle}">${toggleLabel}</button></td>
   </tr>`;
 }
 
@@ -404,7 +340,7 @@ function renderNodeRow(node) {
   return `<tr>
     <td>${escapeHtml(node.name)}</td>
     <td><span class="pill ${node.status === "connected" ? "ok" : "bad"}">${escapeHtml(displayStatus(node.status))}</span></td>
-    <td class="path">${escapeHtml(node.url)}</td>
+    <td class="path opt-col">${escapeHtml(node.url)}</td>
     <td>${node.sessions.length}</td>
     <td>${canRemove ? `<button class="ghost danger-text" onclick="removeNode('${escapeJs(node.name)}')">移除</button>` : ""}</td>
   </tr>`;
@@ -459,7 +395,7 @@ function styles() {
     * { box-sizing: border-box; }
     body { margin: 0; font: 14px/1.45 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
     header { height: 56px; display: flex; align-items: center; gap: 22px; padding: 0 24px; background: #fff; border-bottom: 1px solid var(--line); position: sticky; top: 0; z-index: 1; }
-    .brand { font-weight: 700; color: var(--text); text-decoration: none; }
+    .brand { font-weight: 700; color: var(--text); text-decoration: none; white-space: nowrap; }
     nav { display: flex; gap: 14px; flex: 1; }
     nav a, a { color: var(--blue); text-decoration: none; }
     main { max-width: 1180px; margin: 0 auto; padding: 24px; }
@@ -470,50 +406,86 @@ function styles() {
     p { margin: 8px 0 0; color: var(--muted); }
     .hero { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 20px; }
     .hero.compact { align-items: center; }
-    .grid.two { display: grid; grid-template-columns: minmax(320px, 0.8fr) 1.2fr; gap: 18px; margin-bottom: 18px; }
+    .grid.two { display: grid; grid-template-columns: minmax(280px, 0.8fr) 1.2fr; gap: 18px; margin-bottom: 18px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 18px; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
     .panel.narrow { max-width: 420px; margin: 80px auto; }
     .stack { display: grid; gap: 12px; }
     label { display: grid; gap: 6px; color: #344054; font-weight: 600; }
     input, select, button { font: inherit; }
-    input, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 9px 10px; background: #fff; color: var(--text); }
-    button, .button-link { border: 0; border-radius: 6px; padding: 9px 12px; background: var(--blue); color: #fff; cursor: pointer; text-decoration: none; display: inline-block; }
-    button.ghost { background: transparent; color: var(--blue); padding: 6px 8px; }
+    input, select { width: 100%; border: 1px solid #cbd5e1; border-radius: 6px; padding: 10px 12px; background: #fff; color: var(--text); }
+    button, .button-link { border: 0; border-radius: 6px; padding: 10px 16px; min-height: 44px; background: var(--blue); color: #fff; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; justify-content: center; }
+    button.ghost { background: transparent; color: var(--blue); padding: 8px 10px; min-height: 44px; }
     button.danger { background: var(--red); }
     .danger-text { color: var(--red) !important; }
     .muted, .empty { color: var(--muted); }
     .error, .bad-text { color: var(--red); }
     .ok-text { color: var(--green); }
-    table { width: 100%; border-collapse: collapse; }
+    .table-wrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    table { width: 100%; border-collapse: collapse; min-width: 480px; }
     th, td { text-align: left; border-bottom: 1px solid #edf1f6; padding: 10px 8px; vertical-align: top; }
-    th { color: #475467; font-size: 12px; text-transform: uppercase; letter-spacing: 0; }
+    th { color: #475467; font-size: 12px; text-transform: uppercase; letter-spacing: 0; white-space: nowrap; }
     .path { max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #475467; }
-    .pill { display: inline-block; border-radius: 999px; background: #eef2f7; color: #344054; padding: 2px 8px; font-size: 12px; }
+    .pill { display: inline-block; border-radius: 999px; background: #eef2f7; color: #344054; padding: 2px 8px; font-size: 12px; white-space: nowrap; }
     .pill.ok { background: #dcfae6; color: #067647; }
     .pill.bad { background: #fee4e2; color: #b42318; }
     .node-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
     .node-badge { border: 1px solid var(--line); border-radius: 8px; padding: 12px; display: grid; gap: 2px; }
     .terminal-panel { padding: 0; overflow: hidden; }
-    .window-tabs { display: flex; gap: 8px; overflow-x: auto; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fff; }
-    .window-tab { min-width: 120px; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px; color: var(--text); display: grid; gap: 2px; text-decoration: none; }
+    .window-tabs { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 10px 12px; border-bottom: 1px solid var(--line); background: #fff; }
+    .window-tab { min-width: 120px; border: 1px solid var(--line); border-radius: 6px; padding: 10px 12px; color: var(--text); display: grid; gap: 2px; text-decoration: none; }
     .window-tab span { color: var(--muted); font-size: 12px; }
     .window-tab.is-active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
-    .terminal-toolbar { height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 0 12px; border-bottom: 1px solid var(--line); background: #f8fafc; color: #344054; font-weight: 600; }
-    .view-tabs { display: inline-flex; gap: 4px; padding: 3px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
-    .view-tab { background: transparent; color: #475467; padding: 5px 10px; border-radius: 6px; }
-    .view-tab.is-active { background: #e8f1ff; color: #155eef; }
-    .is-hidden { display: none !important; }
-    .chat-view { height: calc(100vh - 238px); min-height: 560px; overflow: auto; padding: 22px; background: #f8fafc; }
-    .chat-empty { max-width: 520px; margin: 80px auto; text-align: center; color: var(--muted); }
-    .chat-message { display: grid; gap: 6px; margin: 0 0 18px; max-width: min(860px, 86%); }
-    .chat-message.user { margin-left: auto; justify-items: end; }
-    .chat-message.agent { margin-right: auto; justify-items: start; }
-    .chat-role { font-size: 12px; color: #667085; font-weight: 700; padding: 0 4px; }
-    .chat-bubble { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; white-space: pre-wrap; word-break: break-word; box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
-    .chat-message.user .chat-bubble { background: #155eef; color: #fff; border-color: #155eef; }
-    .chat-message.agent .chat-bubble { background: #fff; color: #182230; }
     #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
+    #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
+    #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
+    #terminal .c4 { color: #3971ed; } #terminal .c5 { color: #a36ac7; } #terminal .c6 { color: #3971ed; } #terminal .c7 { color: #c5c8c6; }
+    #terminal .c8 { color: #545454; } #terminal .c9 { color: #f96a5d; } #terminal .c10 { color: #40d472; } #terminal .c11 { color: #f0c600; }
+    #terminal .c12 { color: #6ea8fe; } #terminal .c13 { color: #d2a8ff; } #terminal .c14 { color: #79c0ff; } #terminal .c15 { color: #fff; }
+    #terminal .bg0 { background: #1c1c1c; } #terminal .bg1 { background: #cc342d; } #terminal .bg2 { background: #198844; } #terminal .bg3 { background: #c4a000; }
+    #terminal .bg4 { background: #3971ed; } #terminal .bg5 { background: #a36ac7; } #terminal .bg6 { background: #3971ed; } #terminal .bg7 { background: #c5c8c6; }
+    #terminal .bg8 { background: #545454; } #terminal .bg9 { background: #f96a5d; } #terminal .bg10 { background: #40d472; } #terminal .bg11 { background: #f0c600; }
+    #terminal .bg12 { background: #6ea8fe; } #terminal .bg13 { background: #d2a8ff; } #terminal .bg14 { background: #79c0ff; } #terminal .bg15 { background: #fff; }
     .terminal-input { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #fff; }
-    @media (max-width: 760px) { main, main.session-main { padding: 16px; } .grid.two { grid-template-columns: 1fr; } header { padding: 0 14px; } .hero { display: grid; } .path { max-width: 220px; } .terminal-toolbar { height: auto; align-items: start; flex-direction: column; padding: 10px 12px; } #terminal, .chat-view { height: calc(100vh - 280px); min-height: 420px; } .chat-message { max-width: 94%; } }
+
+    @media (max-width: 760px) {
+      main, main.session-main { padding: 14px; }
+      .grid.two { grid-template-columns: 1fr; gap: 14px; }
+      header { height: auto; min-height: 50px; gap: 12px; padding: 10px 14px; flex-wrap: wrap; }
+      nav { gap: 10px; }
+      h1 { font-size: 22px; }
+      .hero { display: grid; gap: 12px; }
+      .hero.compact button.danger { width: 100%; }
+      .panel { padding: 14px; }
+      .panel.narrow { max-width: none; margin: 20px auto; }
+      .path { max-width: 200px; }
+      .node-list { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
+      #terminal { height: calc(100vh - 200px); min-height: 420px; }
+    }
+
+    @media (max-width: 480px) {
+      body { font-size: 13px; }
+      main, main.session-main { padding: 10px; }
+      header { gap: 8px; padding: 8px 10px; }
+      .brand { font-size: 15px; }
+      nav { gap: 8px; font-size: 13px; }
+      h1 { font-size: 20px; }
+      h2 { font-size: 15px; margin-bottom: 12px; }
+      .hero { gap: 8px; margin-bottom: 14px; }
+      .grid.two { gap: 10px; margin-bottom: 14px; }
+      .panel { padding: 12px; }
+      .stack { gap: 10px; }
+      label { gap: 4px; }
+      .opt-col { display: none; }
+      .path { max-width: 140px; }
+      .node-list { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
+      .node-badge { padding: 10px; }
+      .window-tabs { gap: 6px; padding: 8px 10px; }
+      .window-tab { min-width: 90px; padding: 8px 10px; font-size: 13px; }
+      #terminal { height: calc(100vh - 180px); min-height: 360px; padding: 12px; font-size: 12px; }
+      .terminal-input { gap: 8px; padding: 10px; }
+      table { min-width: 360px; }
+      th, td { padding: 8px 6px; }
+      th { font-size: 11px; }
+    }
   `;
 }

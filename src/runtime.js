@@ -155,7 +155,7 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
     error.statusCode = 404;
     throw error;
   }
-  const { stdout } = await execFileAsync("tmux", ["capture-pane", "-t", tmuxTarget(name, windowIndex), "-p", "-S", `-${safeLines}`]);
+  const { stdout } = await execFileAsync("tmux", ["capture-pane", "-e", "-t", tmuxTarget(name, windowIndex), "-p", "-S", `-${safeLines}`]);
   return stdout.replace(/\s+$/u, "");
 }
 

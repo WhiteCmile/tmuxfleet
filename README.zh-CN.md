@@ -14,8 +14,7 @@ session、创建 session、抓取输出、发送输入，以及在浏览器、Hu
 - 在浏览器里打开某个 session。
 - 支持一个 tmux session 里的多个 window。
 - 向选中的 tmux window 发送单行输入。
-- 显示从终端输出整理出来的 Chat 视图。
-- 保留原始 Terminal 视图用于排查问题。
+- 显示终端输出用于排查问题。
 - 停止 tmux sessions。
 
 ## 架构
@@ -207,7 +206,7 @@ Authorization: Bearer <TMUXFLEET_NODE_TOKEN>
 - 主动连接的 Node 使用 Hub 命令轮询，不是持久 WebSocket。
 - 输入是按行发送，不是完整键盘/PTY 交互。
 - 已支持一个 tmux session 里的多个 window；暂不支持选择同一个 window 里的多个 pane。
-- Chat 目前是从终端输出启发式整理出来的，还不是真正的 Codex/Claude transcript parser。
+
 - URL Node 应只在可信网络中访问。主动连接的 Node 只需要能 outbound 访问 Hub。
 
 ## 致谢

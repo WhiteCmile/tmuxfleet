@@ -16,7 +16,7 @@ and proxies requests between the browser, the Hub, and Nodes.
 - Opens a session in the browser.
 - Supports multiple tmux windows inside one session.
 - Sends one-line input to the selected tmux window.
-- Shows a Chat view derived from terminal output.
+
 - Keeps a raw Terminal view for debugging.
 - Stops tmux sessions.
 
@@ -213,8 +213,7 @@ Connected Node agent endpoints use the same bearer token:
 - Input is line-based, not full keyboard/PTY interaction.
 - Multiple tmux windows are supported; multiple panes inside one window are not
   yet selectable.
-- Chat is currently derived heuristically from terminal output. It is not yet a
-  true Codex/Claude transcript parser.
+
 - URL Nodes should be reachable only on trusted networks. Connected Nodes only
   need outbound access to the Hub.
 

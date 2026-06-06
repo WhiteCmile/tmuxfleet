@@ -19,7 +19,7 @@ import {
   sendHtml,
   sendJson
 } from "./http.js";
-import { addNode, loadNodes, removeNode } from "./state.js";
+import { addNode, loadHiddenSessions, loadNodes, removeNode, setSessionHidden } from "./state.js";
 import { nodeToken } from "./node_server.js";
 
 const AUTH_COOKIE = "tmuxfleet_auth";
@@ -146,6 +146,14 @@ export function startHubServer({ host, port }) {
     sendJson(res, 200, { status: "sent" });
   }));
 
+  app.add("PUT", "/api/sessions/:node/:name/hide", requireHubAuth(async ({ res, params, body }) => {
+    const node = findHubNode(params.node);
+    const payload = await body();
+    const hidden = !!payload.hidden;
+    setSessionHidden(node.name, params.name, hidden);
+    sendJson(res, 200, { status: "ok", hidden });
+  }));
+
   app.add("POST", "/api/agent/register", requireAgentAuth(async ({ res, body }) => {
     const payload = await body();
     const entry = touchConnectedNode(payload.name, payload.hostname);
@@ -192,6 +200,13 @@ export async function collectNodeViews() {
       views.push({ ...node, status: "connected", sessions: await withNodeName(node, payload.sessions || []) });
     } catch (error) {
       views.push({ ...node, status: "disconnected", error: error.message, sessions: [] });
+    }
+  }
+  const hiddenSessions = loadHiddenSessions();
+  for (const view of views) {
+    for (const session of view.sessions) {
+      const key = `${view.name}/${session.name}`;
+      session.hidden = !!hiddenSessions[key];
     }
   }
   return views;
