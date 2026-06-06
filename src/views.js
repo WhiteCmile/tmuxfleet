@@ -300,7 +300,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         if (autoscroll) {
           terminal.scrollTop = terminal.scrollHeight;
         }
-        } catch(e) { /* silently retry next interval */ }
+        } catch(e) { terminal.textContent = "[refresh error] " + (e.message || String(e)); }
       }
 
       document.querySelector("#send-message").addEventListener("submit", async (event) => {
