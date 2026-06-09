@@ -110,6 +110,14 @@ export TMUXFLEET_NODE_TOKEN="<shared node token>"
 node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
 ```
 
+If a Node must reach an HTTP Hub through a network proxy, set the standard
+`http_proxy` or `HTTP_PROXY` environment variable before starting the Node:
+
+```bash
+export http_proxy=http://127.0.0.1:7890
+node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
+```
+
 The Node appears automatically on the Hub's Nodes page. Use a different `--name`
 for each machine. All Nodes can connect to the same Hub URL and port.
 

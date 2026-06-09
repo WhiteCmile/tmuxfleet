@@ -106,6 +106,14 @@ export TMUXFLEET_NODE_TOKEN="<shared node token>"
 node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
 ```
 
+如果 Node 需要通过网络代理访问 HTTP Hub，在启动 Node 前设置标准的
+`http_proxy` 或 `HTTP_PROXY` 环境变量：
+
+```bash
+export http_proxy=http://127.0.0.1:7890
+node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
+```
+
 这个 Node 会自动出现在 Hub 的 Nodes 页面。每台机器使用不同的 `--name`。
 所有 Node 都可以连接同一个 Hub URL 和端口。
 
