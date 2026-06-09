@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import http from "node:http";
 import os from "node:os";
 
 import { bearerToken, createRouter, listen, sendJson } from "./http.js";
@@ -137,30 +138,85 @@ async function runNodeCommand(command) {
   return { ok: false, status: 404, error: `Unsupported command: ${method} ${path}` };
 }
 
-async function requestHubJson(hubUrl, method, path, body) {
+export async function requestHubJson(hubUrl, method, path, body) {
   const token = nodeToken();
   if (!token) {
     throw new Error("TMUXFLEET_NODE_TOKEN is required");
   }
-  const response = await fetch(new URL(path, hubUrl).toString(), {
+  const url = new URL(path, hubUrl).toString();
+  const requestBody = JSON.stringify(body || {});
+  const response = await fetchHub(url, {
     method,
     headers: {
       "content-type": "application/json",
       authorization: `Bearer ${token}`
     },
-    body: JSON.stringify(body || {})
+    body: requestBody
   });
-  const text = await response.text();
   let payload = {};
   try {
-    payload = text ? JSON.parse(text) : {};
+    payload = response.text ? JSON.parse(response.text) : {};
   } catch {
-    payload = { detail: text };
+    payload = { detail: response.text };
   }
-  if (!response.ok) {
+  if (response.status < 200 || response.status >= 300) {
     throw new Error(payload.detail || `Hub request failed: ${response.status}`);
   }
   return payload;
+}
+
+async function fetchHub(url, options) {
+  const proxy = hubHttpProxy(url);
+  if (!proxy) {
+    const response = await fetch(url, options);
+    return { status: response.status, text: await response.text() };
+  }
+  return requestViaHttpProxy(proxy, url, options);
+}
+
+export function hubHttpProxy(url, env = process.env) {
+  const target = new URL(url);
+  if (target.protocol !== "http:") return "";
+  return String(env.http_proxy || env.HTTP_PROXY || "").trim();
+}
+
+function requestViaHttpProxy(proxyUrl, targetUrl, options) {
+  return new Promise((resolve, reject) => {
+    const proxy = new URL(proxyUrl);
+    const target = new URL(targetUrl);
+    if (proxy.protocol !== "http:") {
+      reject(new Error(`Unsupported Hub proxy protocol: ${proxy.protocol}`));
+      return;
+    }
+
+    const headers = {
+      ...options.headers,
+      host: target.host,
+      "content-length": Buffer.byteLength(options.body || "")
+    };
+    if (proxy.username || proxy.password) {
+      const username = decodeURIComponent(proxy.username);
+      const password = decodeURIComponent(proxy.password);
+      headers["proxy-authorization"] = `Basic ${Buffer.from(`${username}:${password}`).toString("base64")}`;
+    }
+
+    const req = http.request({
+      host: proxy.hostname,
+      port: Number(proxy.port || 80),
+      method: options.method,
+      path: targetUrl,
+      headers,
+      timeout: 30000
+    }, (res) => {
+      let text = "";
+      res.setEncoding("utf8");
+      res.on("data", (chunk) => { text += chunk; });
+      res.on("end", () => resolve({ status: res.statusCode || 0, text }));
+    });
+    req.on("timeout", () => req.destroy(new Error("Hub proxy request timed out")));
+    req.on("error", reject);
+    req.end(options.body || "");
+  });
 }
 
 function withNodeAuth(handler) {
