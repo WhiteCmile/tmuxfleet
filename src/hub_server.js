@@ -2,6 +2,14 @@ import crypto from "node:crypto";
 import fs from "node:fs";
 
 import {
+  AUTO_RECOVER_COOLDOWN_MS,
+  markSmartRecoverReviewed,
+  recentOutputForReview,
+  SMART_RECOVER_STALE_MS,
+  updateSmartRecoverObservation,
+  shouldSendAutoRecover
+} from "./auto_recover.js";
+import {
   captureOutput,
   createSession,
   killSession,
@@ -36,13 +44,8 @@ const AGENT_COMMAND_TIMEOUT_MS = 15000;
 const AGENT_POLL_TIMEOUT_MS = 25000;
 const AGENT_ONLINE_MS = 35000;
 const AUTO_RECOVER_INTERVAL_MS = 20000;
-const AUTO_RECOVER_COOLDOWN_MS = 120000;
-const AUTO_RECOVER_ERROR_PATTERNS = [
-  /\bAPI Error\b/i,
-  /\b(?:network|connection)\s+(?:error|failed|failure|lost|reset|refused|timeout|timed out|closed|disconnected)\b/i,
-  /\b(?:error sending request|request failed|failed to fetch|fetch failed|socket hang up)\b/i,
-  /\b(?:ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|EAI_AGAIN)\b/
-];
+const SMART_RECOVER_LLM_TIMEOUT_MS = 15000;
+const SMART_RECOVER_CONFIDENCE = 0.8;
 
 const connectedNodes = new Map();
 const autoRecoverHistory = new Map();
@@ -179,7 +182,8 @@ export function startHubServer({ host, port }) {
     const config = setSessionAutoRecover(node.name, params.name, {
       enabled: !!payload.enabled,
       window: payload.window || "",
-      message: payload.message || "go on"
+      message: payload.message || "go on",
+      smart: !!payload.smart
     });
     sendJson(res, 200, { status: "ok", enabled: !!config, config });
   }));
@@ -358,36 +362,114 @@ async function scanAutoRecoverSession(nodeName, sessionName, config) {
     console.error(`tmuxfleet auto-recover skipped ${nodeName}/${sessionName}: ${error.message || error}`);
     return;
   }
-  const fingerprint = autoRecoverFingerprint(output);
-  if (!fingerprint || !looksRecoverableAgentError(output)) return;
   const historyKey = `${nodeName}/${sessionName}:${windowIndex}`;
   const previous = autoRecoverHistory.get(historyKey);
   const now = Date.now();
-  if (previous && previous.fingerprint === fingerprint) {
+  const decision = shouldSendAutoRecover({ output, previous, now, cooldownMs: AUTO_RECOVER_COOLDOWN_MS });
+  if (decision.send) {
+    await sendNodeMessage(node, sessionName, message, windowIndex);
+    autoRecoverHistory.set(historyKey, { ...previous, fingerprint: decision.fingerprint, sentAt: now });
+    console.log(`tmuxfleet auto-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}`);
     return;
   }
-  if (previous && now - previous.sentAt < AUTO_RECOVER_COOLDOWN_MS) {
-    return;
-  }
+  if (!config.smart) return;
+
+  const smartDecision = updateSmartRecoverObservation({
+    output,
+    previous,
+    now,
+    staleMs: SMART_RECOVER_STALE_MS
+  });
+  autoRecoverHistory.set(historyKey, smartDecision.observation || {});
+  if (!smartDecision.review) return;
+
+  const review = await reviewSmartRecover({
+    nodeName,
+    sessionName,
+    windowIndex,
+    output: recentOutputForReview(output)
+  });
+  const reviewedHistory = markSmartRecoverReviewed(
+    autoRecoverHistory.get(historyKey),
+    smartDecision.fingerprint,
+    Date.now()
+  );
+  autoRecoverHistory.set(historyKey, reviewedHistory);
+  if (!review.shouldSend) return;
   await sendNodeMessage(node, sessionName, message, windowIndex);
-  autoRecoverHistory.set(historyKey, { fingerprint, sentAt: now });
-  console.log(`tmuxfleet auto-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}`);
+  autoRecoverHistory.set(historyKey, {
+    ...reviewedHistory,
+    fingerprint: smartDecision.fingerprint,
+    sentAt: Date.now()
+  });
+  console.log(`tmuxfleet smart-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}: ${review.reason || "LLM approved"}`);
 }
 
-function looksRecoverableAgentError(output) {
-  const tail = String(output || "").slice(-8000);
-  return AUTO_RECOVER_ERROR_PATTERNS.some((pattern) => pattern.test(tail));
+async function reviewSmartRecover({ nodeName, sessionName, windowIndex, output }) {
+  const settings = smartRecoverSettings();
+  if (!settings.enabled) return { shouldSend: false, reason: settings.reason };
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), SMART_RECOVER_LLM_TIMEOUT_MS);
+  try {
+    const response = await fetch(settings.url, {
+      method: "POST",
+      signal: controller.signal,
+      headers: {
+        "content-type": "application/json",
+        authorization: `Bearer ${settings.key}`
+      },
+      body: JSON.stringify({
+        model: settings.model,
+        temperature: 0,
+        response_format: { type: "json_object" },
+        messages: [
+          {
+            role: "system",
+            content: [
+              "You judge whether a tmux terminal running an AI coding agent is stuck because of a transient API/network interruption.",
+              "Return strict JSON only with keys: should_send_go_on(boolean), confidence(number 0-1), reason(string).",
+              "Only approve go on when the agent appears interrupted or waiting after a recoverable network/API failure.",
+              "Do not approve if the task appears complete, is waiting for normal user input, or the output is ambiguous."
+            ].join(" ")
+          },
+          {
+            role: "user",
+            content: [
+              `Session: ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}`,
+              "Recent terminal output:",
+              output
+            ].join("\n\n")
+          }
+        ]
+      })
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      return { shouldSend: false, reason: `LLM request failed: ${response.status}` };
+    }
+    const payload = text ? JSON.parse(text) : {};
+    const content = payload.choices?.[0]?.message?.content || "{}";
+    const decision = JSON.parse(content);
+    const confidence = Number(decision.confidence || 0);
+    return {
+      shouldSend: decision.should_send_go_on === true && confidence >= SMART_RECOVER_CONFIDENCE,
+      confidence,
+      reason: String(decision.reason || "")
+    };
+  } catch (error) {
+    return { shouldSend: false, reason: `LLM review failed: ${error.message || error}` };
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
-function autoRecoverFingerprint(output) {
-  const matchingLines = String(output || "")
-    .split("\n")
-    .map((line) => line.trim())
-    .filter(Boolean)
-    .filter((line) => AUTO_RECOVER_ERROR_PATTERNS.some((pattern) => pattern.test(line)))
-    .slice(-3);
-  if (!matchingLines.length) return "";
-  return crypto.createHash("sha1").update(matchingLines.join("\n")).digest("hex");
+function smartRecoverSettings() {
+  const url = String(process.env.TMUXFLEET_RECOVERY_LLM_URL || "").trim();
+  const key = String(process.env.TMUXFLEET_RECOVERY_LLM_KEY || "").trim();
+  const model = String(process.env.TMUXFLEET_RECOVERY_LLM_MODEL || "deepseek-chat").trim();
+  if (!url) return { enabled: false, reason: "TMUXFLEET_RECOVERY_LLM_URL is not set" };
+  if (!key) return { enabled: false, reason: "TMUXFLEET_RECOVERY_LLM_KEY is not set" };
+  return { enabled: true, url, key, model };
 }
 
 function loadHubNodes() {

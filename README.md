@@ -163,7 +163,7 @@ TMUXFLEET_HUB_TOKEN=test-token TMUXFLEET_NODE_TOKEN=test-token \
 npm run dev:hub -- --host 127.0.0.1 --port 8090
 ```
 
-Check syntax:
+Check syntax and run tests:
 
 ```bash
 npm run check
@@ -201,6 +201,21 @@ Auto-recover is opt-in per session. The Hub scans enabled sessions every 20
 seconds, watches recent tmux output for API/network connection error patterns,
 and sends `go on` to the configured window. The same error fingerprint is not
 sent twice, and different errors are cooled down for 120 seconds between sends.
+
+Smart recover is an optional LLM fallback for sessions where local rules do not
+match. It is disabled by default and only runs for sessions where smart recover
+is enabled in the UI. Configure any OpenAI-compatible chat completions endpoint,
+for example DeepSeek:
+
+```bash
+export TMUXFLEET_RECOVERY_LLM_URL=https://api.deepseek.com/chat/completions
+export TMUXFLEET_RECOVERY_LLM_KEY=...
+export TMUXFLEET_RECOVERY_LLM_MODEL=deepseek-chat
+```
+
+The Hub sends only recent terminal output, asks for strict JSON, and sends
+`go on` only when the model returns `should_send_go_on: true` with confidence at
+least `0.8`.
 
 Hub-to-Node requests use:
 

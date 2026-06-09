@@ -157,7 +157,7 @@ TMUXFLEET_HUB_TOKEN=test-token TMUXFLEET_NODE_TOKEN=test-token \
 npm run dev:hub -- --host 127.0.0.1 --port 8090
 ```
 
-语法检查：
+语法检查和测试：
 
 ```bash
 npm run check
@@ -194,6 +194,19 @@ Hub:
 自动恢复按 session 手动开启。Hub 每 20 秒扫描已开启的 session，检查最近的
 tmux 输出是否命中 API/网络连接错误模式，命中后向配置的 window 发送 `go on`。
 同一条错误指纹不会重复发送；不同错误之间也会冷却 120 秒。
+
+智能恢复是可选的 LLM 兜底层，用于本地规则没有命中的 session。它默认关闭，
+并且只有在 UI 里给单个 session 开启后才会运行。可以配置任意
+OpenAI-compatible chat completions endpoint，例如 DeepSeek：
+
+```bash
+export TMUXFLEET_RECOVERY_LLM_URL=https://api.deepseek.com/chat/completions
+export TMUXFLEET_RECOVERY_LLM_KEY=...
+export TMUXFLEET_RECOVERY_LLM_MODEL=deepseek-chat
+```
+
+Hub 只发送最近一小段终端输出，要求模型返回严格 JSON，并且只有当模型返回
+`should_send_go_on: true` 且 confidence 至少为 `0.8` 时才发送 `go on`。
 
 Hub 请求 Node 时使用：
 

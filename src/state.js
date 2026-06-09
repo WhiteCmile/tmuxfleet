@@ -100,13 +100,14 @@ export function loadAutoRecoverSessions() {
   }
 }
 
-export function setSessionAutoRecover(nodeName, sessionName, { enabled, window = "", message = "go on" }) {
+export function setSessionAutoRecover(nodeName, sessionName, { enabled, window = "", message = "go on", smart = false }) {
   const key = `${nodeName}/${sessionName}`;
   const sessions = loadAutoRecoverSessions();
   if (enabled) {
     sessions[key] = {
       window: String(window ?? ""),
       message: String(message || "go on"),
+      smart: !!smart,
       updatedAt: new Date().toISOString()
     };
   } else {

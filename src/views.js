@@ -230,8 +230,10 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
   const autoRecoverWindow = autoRecoverEnabled ? String(autoRecoverConfig.window ?? "") : "";
   const autoRecoverOnActiveWindow = autoRecoverEnabled && autoRecoverWindow === activeWindow;
   const autoRecoverLabel = autoRecoverOnActiveWindow ? "关闭自动恢复" : "开启自动恢复";
+  const smartRecoverEnabled = autoRecoverEnabled && !!autoRecoverConfig.smart;
+  const smartRecoverLabel = smartRecoverEnabled ? "关闭智能恢复" : "开启智能恢复";
   const autoRecoverStatus = autoRecoverEnabled
-    ? `已开启：window ${autoRecoverWindow || "默认"} · ${autoRecoverConfig.message || "go on"}`
+    ? `规则恢复：window ${autoRecoverWindow || "默认"} · ${autoRecoverConfig.message || "go on"} · 智能恢复${smartRecoverEnabled ? "已开启" : "未开启"}`
     : "未开启";
   return page(`${node.name}/${name}`, `
     <section class="hero compact">
@@ -248,7 +250,10 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       </div>
       <div class="terminal-tools">
         <span id="autorecover-status">${escapeHtml(autoRecoverStatus)}</span>
-        <button id="toggle-autorecover" class="ghost" type="button">${escapeHtml(autoRecoverLabel)}</button>
+        <span class="terminal-actions">
+          <button id="toggle-autorecover" class="ghost" type="button">${escapeHtml(autoRecoverLabel)}</button>
+          <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
+        </span>
       </div>
       <pre id="terminal">${ansiToHtml(output)}</pre>
       <form id="send-message" class="terminal-input">
@@ -262,6 +267,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       const name = ${JSON.stringify(name)};
       const activeWindow = ${JSON.stringify(activeWindow)};
       let autoRecoverOnActiveWindow = ${JSON.stringify(autoRecoverOnActiveWindow)};
+      let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
       const terminal = document.querySelector("#terminal");
       let autoscroll = true;
 
@@ -358,7 +364,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/autorecover", {
             method: "PUT",
             headers: {"content-type": "application/json"},
-            body: JSON.stringify({enabled: !autoRecoverOnActiveWindow, window: activeWindow, message: "go on"})
+            body: JSON.stringify({enabled: !autoRecoverOnActiveWindow, window: activeWindow, message: "go on", smart: smartRecoverEnabled && !autoRecoverOnActiveWindow})
           });
           const body = await response.json().catch(() => ({}));
           if (!response.ok) {
@@ -366,8 +372,40 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
             return;
           }
           autoRecoverOnActiveWindow = !autoRecoverOnActiveWindow;
+          if (!autoRecoverOnActiveWindow) smartRecoverEnabled = false;
           button.textContent = autoRecoverOnActiveWindow ? "关闭自动恢复" : "开启自动恢复";
-          status.textContent = autoRecoverOnActiveWindow ? ("已开启：window " + (activeWindow || "默认") + " · go on") : "未开启";
+          document.querySelector("#toggle-smartrecover").textContent = smartRecoverEnabled ? "关闭智能恢复" : "开启智能恢复";
+          status.textContent = autoRecoverOnActiveWindow
+            ? ("规则恢复：window " + (activeWindow || "默认") + " · go on · 智能恢复" + (smartRecoverEnabled ? "已开启" : "未开启"))
+            : "未开启";
+        } catch (error) {
+          status.textContent = "更新失败：" + (error.message || String(error));
+        } finally {
+          button.disabled = false;
+        }
+      });
+      document.querySelector("#toggle-smartrecover").addEventListener("click", async (event) => {
+        const button = event.currentTarget;
+        const status = document.querySelector("#autorecover-status");
+        button.disabled = true;
+        const nextSmart = !smartRecoverEnabled;
+        status.textContent = nextSmart ? "正在开启智能恢复..." : "正在关闭智能恢复...";
+        try {
+          const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/autorecover", {
+            method: "PUT",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({enabled: true, window: activeWindow, message: "go on", smart: nextSmart})
+          });
+          const body = await response.json().catch(() => ({}));
+          if (!response.ok) {
+            status.textContent = body.detail || "更新失败";
+            return;
+          }
+          autoRecoverOnActiveWindow = true;
+          smartRecoverEnabled = nextSmart;
+          document.querySelector("#toggle-autorecover").textContent = "关闭自动恢复";
+          button.textContent = smartRecoverEnabled ? "关闭智能恢复" : "开启智能恢复";
+          status.textContent = "规则恢复：window " + (activeWindow || "默认") + " · go on · 智能恢复" + (smartRecoverEnabled ? "已开启" : "未开启");
         } catch (error) {
           status.textContent = "更新失败：" + (error.message || String(error));
         } finally {
@@ -508,6 +546,7 @@ function styles() {
     .window-tab span { color: var(--muted); font-size: 12px; }
     .window-tab.is-active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
     .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: #fbfcfe; color: var(--muted); }
+    .terminal-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
     #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
@@ -555,6 +594,7 @@ function styles() {
       .window-tabs { gap: 6px; padding: 8px 10px; }
       .window-tab { min-width: 90px; padding: 8px 10px; font-size: 13px; }
       .terminal-tools { align-items: stretch; display: grid; gap: 6px; }
+      .terminal-actions { display: grid; justify-content: stretch; }
       .terminal-tools button { width: 100%; }
       #terminal { height: calc(100vh - 180px); min-height: 360px; padding: 12px; font-size: 12px; }
       .terminal-input { gap: 8px; padding: 10px; }
