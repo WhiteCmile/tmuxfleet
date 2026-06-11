@@ -15,6 +15,7 @@ import {
   killSession,
   listSessions,
   listWindows,
+  resizeWindow,
   sendMessage
 } from "./runtime.js";
 import {
@@ -168,6 +169,13 @@ export function startHubServer({ host, port }) {
     sendJson(res, 200, { status: "sent" });
   }));
 
+  app.add("POST", "/api/sessions/:node/:name/resize", requireHubAuth(async ({ res, params, body }) => {
+    const node = findHubNode(params.node);
+    const payload = await body();
+    await resizeNodeWindow(node, params.name, payload.cols, payload.rows, payload.window || "");
+    sendJson(res, 200, { status: "resized" });
+  }));
+
   app.add("PUT", "/api/sessions/:node/:name/hide", requireHubAuth(async ({ res, params, body }) => {
     const node = findHubNode(params.node);
     const payload = await body();
@@ -316,6 +324,19 @@ async function sendNodeMessage(node, name, text, windowIndex = "") {
     text,
     window: windowIndex
   });
+}
+
+async function resizeNodeWindow(node, name, cols, rows, windowIndex = "") {
+  if (node.mode === "local") {
+    await resizeWindow(name, cols, rows, windowIndex);
+    return;
+  }
+  const body = { cols, rows, window: windowIndex };
+  if (node.mode === "connected") {
+    await requestConnectedNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
+    return;
+  }
+  await requestNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
 }
 
 function startAutoRecoverLoop() {

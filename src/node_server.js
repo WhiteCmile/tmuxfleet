@@ -9,6 +9,7 @@ import {
   killSession,
   listSessions,
   listWindows,
+  resizeWindow,
   sendMessage,
   tmuxAvailable
 } from "./runtime.js";
@@ -55,6 +56,12 @@ export function startNodeServer({ host, port }) {
     const payload = await body();
     await sendMessage(params.name, payload.text, payload.window || "");
     sendJson(res, 200, { status: "sent" });
+  }));
+
+  app.add("POST", "/api/sessions/:name/resize", withNodeAuth(async ({ res, params, body }) => {
+    const payload = await body();
+    await resizeWindow(params.name, payload.cols, payload.rows, payload.window || "");
+    sendJson(res, 200, { status: "resized" });
   }));
 
   const server = listen(app, host, port);
@@ -132,6 +139,10 @@ async function runNodeCommand(command) {
     if (method === "POST" && parts[3] === "send") {
       await sendMessage(sessionName, body.text, body.window || "");
       return { ok: true, status: 200, payload: { status: "sent" } };
+    }
+    if (method === "POST" && parts[3] === "resize") {
+      await resizeWindow(sessionName, body.cols, body.rows, body.window || "");
+      return { ok: true, status: 200, payload: { status: "resized" } };
     }
   }
 

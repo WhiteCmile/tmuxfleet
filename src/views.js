@@ -270,13 +270,56 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
       const terminal = document.querySelector("#terminal");
       let autoscroll = true;
+      let lastTerminalSize = "";
+      let resizeTimer = null;
 
       terminal.addEventListener("scroll", () => {
         autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
       });
 
+      function measureTerminalSize() {
+        const style = getComputedStyle(terminal);
+        const probe = document.createElement("span");
+        probe.textContent = "MMMMMMMMMM";
+        probe.style.position = "absolute";
+        probe.style.visibility = "hidden";
+        probe.style.whiteSpace = "pre";
+        probe.style.font = style.font;
+        terminal.appendChild(probe);
+        const rect = probe.getBoundingClientRect();
+        probe.remove();
+        const charWidth = rect.width / 10 || 8;
+        const lineHeight = parseFloat(style.lineHeight) || rect.height || 18;
+        const contentWidth = terminal.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0);
+        const contentHeight = terminal.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0);
+        return {
+          cols: Math.max(40, Math.min(300, Math.floor(contentWidth / charWidth))),
+          rows: Math.max(10, Math.min(120, Math.floor(contentHeight / lineHeight))),
+        };
+      }
+
+      async function syncTerminalSize() {
+        try {
+          const size = measureTerminalSize();
+          const key = size.cols + "x" + size.rows;
+          if (key === lastTerminalSize) return;
+          const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/resize", {
+            method: "POST",
+            headers: {"content-type": "application/json"},
+            body: JSON.stringify({window: activeWindow, cols: size.cols, rows: size.rows})
+          });
+          if (response.ok) lastTerminalSize = key;
+        } catch (_) {}
+      }
+
+      function scheduleTerminalResize() {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(syncTerminalSize, 120);
+      }
+
       async function refreshOutput() {
         try {
+        await syncTerminalSize();
         const query = new URLSearchParams({lines: "500"});
         if (activeWindow !== "") query.set("window", activeWindow);
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
@@ -412,6 +455,11 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           button.disabled = false;
         }
       });
+      if (window.ResizeObserver) {
+        new ResizeObserver(scheduleTerminalResize).observe(terminal);
+      }
+      window.addEventListener("resize", scheduleTerminalResize);
+      syncTerminalSize().then(refreshOutput);
       setInterval(refreshOutput, 1000);
       terminal.scrollTop = terminal.scrollHeight;
     </script>
