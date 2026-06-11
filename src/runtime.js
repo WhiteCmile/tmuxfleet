@@ -159,6 +159,31 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
   return stdout.replace(/\s+$/u, "");
 }
 
+export async function resizeWindow(name, cols, rows, windowIndex = "") {
+  assertSessionName(name);
+  const safeCols = Math.max(40, Math.min(Number(cols || 0), 300));
+  const safeRows = Math.max(10, Math.min(Number(rows || 0), 120));
+  if (!Number.isFinite(safeCols) || !Number.isFinite(safeRows)) {
+    const error = new Error("Terminal size must include numeric cols and rows");
+    error.statusCode = 400;
+    throw error;
+  }
+  if (!(await sessionExists(name))) {
+    const error = new Error(`tmux session not found: ${name}`);
+    error.statusCode = 404;
+    throw error;
+  }
+  await execFileAsync("tmux", [
+    "resize-window",
+    "-t",
+    tmuxTarget(name, windowIndex),
+    "-x",
+    String(Math.round(safeCols)),
+    "-y",
+    String(Math.round(safeRows))
+  ]);
+}
+
 export async function sendMessage(name, text, windowIndex = "") {
   assertSessionName(name);
   const message = String(text || "");
