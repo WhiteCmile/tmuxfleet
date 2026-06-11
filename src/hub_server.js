@@ -737,11 +737,14 @@ async function readForm(req) {
 function loginForm(next, error) {
   return `
     <section class="panel narrow">
-      <h1>tmuxfleet</h1>
+      <div class="login-brand">
+        <h1>tmuxfleet</h1>
+        <p class="muted">输入 Hub Token 登录</p>
+      </div>
       <form method="post" action="/login" class="stack">
         <input type="hidden" name="next" value="${escapeHtml(next)}">
         <label>Hub Token <input name="token" type="password" autofocus></label>
-        ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+        ${error ? `<p class="form-error">${escapeHtml(error)}</p>` : ""}
         <button type="submit">登录</button>
       </form>
     </section>

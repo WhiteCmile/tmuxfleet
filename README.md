@@ -12,6 +12,9 @@ proxies requests between the browser, the Hub, and Nodes.
 ## Features
 
 - List local and remote tmux sessions.
+- Live dashboard: session and node status, counts, and timestamps refresh in
+  place without page reloads.
+- Web UI follows the system light/dark color scheme.
 - Create sessions with a working directory and command.
 - Open a session in the browser and send line-based input.
 - Switch between multiple tmux windows in one session.

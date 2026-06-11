@@ -11,6 +11,8 @@ Node 之间代理请求。
 ## 功能
 
 - 列出本机和远程 Node 上的 tmux sessions。
+- Dashboard 自动刷新：session 和节点的状态、数量、更新时间原地刷新，无需手动刷新页面。
+- Web UI 跟随系统浅色/深色主题。
 - 用指定工作目录和命令创建 session。
 - 在浏览器里打开 session，并发送按行输入。
 - 在同一个 tmux session 的多个 window 之间切换。
