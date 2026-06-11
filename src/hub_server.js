@@ -15,6 +15,7 @@ import {
   killSession,
   listSessions,
   listWindows,
+  paneInMode,
   resizeWindow,
   sendMessage
 } from "./runtime.js";
@@ -153,13 +154,13 @@ export function startHubServer({ host, port }) {
 
   app.add("GET", "/api/sessions/:node/:name/output", requireHubAuth(async ({ res, params, url }) => {
     const node = findHubNode(params.node);
-    const output = await sessionOutput(
+    const output = await sessionOutputPayload(
       node,
       params.name,
       url.searchParams.get("lines") || 160,
       url.searchParams.get("window") || ""
     );
-    sendJson(res, 200, { output });
+    sendJson(res, 200, output);
   }));
 
   app.add("POST", "/api/sessions/:node/:name/send", requireHubAuth(async ({ res, params, body }) => {
@@ -297,15 +298,25 @@ async function sessionWindows(node, name) {
 }
 
 async function sessionOutput(node, name, lines, windowIndex = "") {
-  if (node.mode === "local") return captureOutput(name, lines, windowIndex);
+  const payload = await sessionOutputPayload(node, name, lines, windowIndex);
+  return payload.output || "";
+}
+
+async function sessionOutputPayload(node, name, lines, windowIndex = "") {
+  if (node.mode === "local") {
+    return {
+      output: await captureOutput(name, lines, windowIndex),
+      inMode: await paneInMode(name, windowIndex)
+    };
+  }
   const query = new URLSearchParams({ lines: String(lines) });
   if (windowIndex !== "") query.set("window", String(windowIndex));
   if (node.mode === "connected") {
     const payload = await requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-    return payload.output || "";
+    return { output: payload.output || "", inMode: !!payload.inMode };
   }
   const payload = await requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-  return payload.output || "";
+  return { output: payload.output || "", inMode: !!payload.inMode };
 }
 
 async function sendNodeMessage(node, name, text, windowIndex = "") {

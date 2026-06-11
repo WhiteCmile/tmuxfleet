@@ -25,6 +25,12 @@ These instructions apply to the entire `tmuxfleet` project.
 - Backend/API changes still require restarting the Hub/Node process or running
   with `node --watch`.
 
+## GitHub Remote
+
+- Use SSH for GitHub git operations in this repository. HTTPS fetch/push has
+  repeatedly failed with GitHub HTTP/2 transport errors here.
+- Prefer `git@github.com:WhiteCmile/tmuxfleet.git` when fetching or pushing.
+
 ## Verification
 
 Run this after code changes:

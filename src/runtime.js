@@ -159,6 +159,17 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
   return stdout.replace(/\s+$/u, "");
 }
 
+export async function paneInMode(name, windowIndex = "") {
+  assertSessionName(name);
+  if (!(await sessionExists(name))) {
+    const error = new Error(`tmux session not found: ${name}`);
+    error.statusCode = 404;
+    throw error;
+  }
+  const { stdout } = await execFileAsync("tmux", ["display-message", "-p", "-t", tmuxTarget(name, windowIndex), "#{pane_in_mode}"]);
+  return stdout.trim() === "1";
+}
+
 export async function resizeWindow(name, cols, rows, windowIndex = "") {
   assertSessionName(name);
   const safeCols = Math.max(40, Math.min(Number(cols || 0), 300));
