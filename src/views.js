@@ -255,7 +255,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
         </span>
       </div>
-      <pre id="terminal">${ansiToHtml(output)}</pre>
+      <pre id="terminal" tabindex="0">${ansiToHtml(output)}</pre>
       <form id="send-message" class="terminal-input">
         <input name="text" autocomplete="off" autofocus placeholder="输入一行内容后按回车">
         <button type="submit">发送</button>
@@ -274,6 +274,33 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       let resizeTimer = null;
 
       terminal.addEventListener("scroll", () => {
+        autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
+      });
+      terminal.addEventListener("wheel", (event) => {
+        if (terminal.scrollHeight <= terminal.clientHeight) return;
+        event.preventDefault();
+        terminal.scrollTop += event.deltaY;
+        autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
+      }, { passive: false });
+      terminal.addEventListener("keydown", (event) => {
+        const keyScroll = {
+          PageUp: -terminal.clientHeight * 0.9,
+          PageDown: terminal.clientHeight * 0.9,
+          ArrowUp: -24,
+          ArrowDown: 24,
+        }[event.key];
+        if (keyScroll !== undefined) {
+          event.preventDefault();
+          terminal.scrollTop += keyScroll;
+        } else if (event.key === "Home") {
+          event.preventDefault();
+          terminal.scrollTop = 0;
+        } else if (event.key === "End") {
+          event.preventDefault();
+          terminal.scrollTop = terminal.scrollHeight;
+        } else {
+          return;
+        }
         autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
       });
 
@@ -599,7 +626,7 @@ function styles() {
     .window-tab.is-active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
     .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: #fbfcfe; color: var(--muted); }
     .terminal-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
+    #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; overscroll-behavior: contain; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
     #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
     #terminal .c4 { color: #3971ed; } #terminal .c5 { color: #a36ac7; } #terminal .c6 { color: #3971ed; } #terminal .c7 { color: #c5c8c6; }
