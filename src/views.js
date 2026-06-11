@@ -36,7 +36,7 @@ function favicon() {
 }
 
 export function renderSessionsPage(nodeViews) {
-  const sessionTableHead = `<thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th class="opt-col">命令</th><th>更新时间</th><th>自动恢复</th><th></th><th></th></tr></thead>`;
+  const sessionTableHead = `<thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th>活动</th><th>更新时间</th><th>自动恢复</th><th></th><th></th></tr></thead>`;
   return page("会话", `
     <section class="hero">
       <div>
@@ -92,7 +92,7 @@ ${clientCommon()}
           + '<td><a class="mono" href="' + esc(href) + '">' + esc(nodeName + "/" + session.name) + "</a></td>"
           + "<td>" + pillHtml(session.status) + "</td>"
           + '<td class="path mono opt-col" title="' + esc(session.cwd || "") + '">' + esc(session.cwd || "-") + "</td>"
-          + '<td class="mono opt-col">' + esc(session.command || "-") + "</td>"
+          + '<td data-activity-cmd="' + esc(session.command || "") + '" data-activity-at="' + esc(session.activityAt || "") + '">' + activityPillHtml(session.command, session.activityAt) + "</td>"
           + '<td data-ts="' + esc(session.lastUpdated || "") + '">' + esc(relTime(session.lastUpdated)) + "</td>"
           + "<td>" + (session.autoRecover ? '<span class="pill ok">已开启</span>' : '<span class="muted">-</span>') + "</td>"
           + '<td><a class="btn-sm button-link" href="' + esc(href) + '">打开</a></td>'
@@ -379,7 +379,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         ${windows.length ? windows.map((windowItem) => renderWindowTab(node, name, windowItem, activeWindow)).join("") : `<span class="muted">没有找到窗口</span>`}
       </div>
       <div class="terminal-tools">
-        <span id="autorecover-status">${escapeHtml(autoRecoverStatus)}</span>
+        <span class="terminal-status"><span id="activity-pill" class="pill" hidden></span><span id="autorecover-status">${escapeHtml(autoRecoverStatus)}</span></span>
         <span class="terminal-actions">
           <button id="toggle-autorecover" class="ghost" type="button">${escapeHtml(autoRecoverLabel)}</button>
           <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
@@ -402,6 +402,27 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       let autoscroll = true;
       let lastTerminalSize = "";
       let resizeTimer = null;
+${clientActivityCore()}
+      function updateActivityPill(command, activityAt) {
+        const pill = document.querySelector("#activity-pill");
+        if (!pill) return;
+        const state = activityState(command, activityAt);
+        if (!state) { pill.hidden = true; return; }
+        pill.hidden = false;
+        if (state === "idle") {
+          pill.className = "pill";
+          pill.textContent = "空闲";
+          pill.title = "前台没有正在运行的命令";
+        } else if (state === "stalled") {
+          pill.className = "pill bad";
+          pill.textContent = command + " · 卡住?";
+          pill.title = "超过 " + Math.round(STALL_MS / 1000) + " 秒没有新输出，可能卡住或在等待输入";
+        } else {
+          pill.className = "pill ok run";
+          pill.textContent = command;
+          pill.title = "正在运行";
+        }
+      }
 
       terminal.addEventListener("scroll", () => {
         autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
@@ -482,6 +503,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
         if (!response.ok) return;
         const body = await response.json();
+        updateActivityPill(body.command, body.activityAt);
         if (body.inMode) return;
         function p256(n) {
           if (n < 16) { var c=["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n]||"#e4e7ec"; }
@@ -653,8 +675,22 @@ function jsonInline(value) {
     .replaceAll("\u2029", "\\u2029");
 }
 
-function clientCommon() {
+function clientActivityCore() {
   return `
+      const SHELLS = ["sh", "bash", "zsh", "fish", "dash", "ash", "ksh", "csh", "tcsh", "pwsh", "nu", "login"];
+      const STALL_MS = 60000;
+      function activityState(command, activityAt) {
+        if (!command) return null;
+        if (SHELLS.indexOf(String(command)) >= 0) return "idle";
+        const last = activityAt ? new Date(activityAt).getTime() : 0;
+        if (last && Date.now() - last > STALL_MS) return "stalled";
+        return "running";
+      }
+`;
+}
+
+function clientCommon() {
+  return clientActivityCore() + `
       function esc(value) {
         return String(value ?? "")
           .replaceAll("&", "&amp;")
@@ -679,9 +715,19 @@ function clientCommon() {
         const text = STATUS_TEXT[status] || status || "-";
         return '<span class="pill' + (kind ? " " + kind : "") + '">' + esc(text) + "</span>";
       }
+      function activityPillHtml(command, activityAt) {
+        const state = activityState(command, activityAt);
+        if (!state) return '<span class="muted">-</span>';
+        if (state === "idle") return '<span class="pill" title="前台没有正在运行的命令">空闲</span>';
+        if (state === "stalled") return '<span class="pill bad" title="超过 ' + Math.round(STALL_MS / 1000) + ' 秒没有新输出，可能卡住或在等待输入">' + esc(command) + ' · 卡住?</span>';
+        return '<span class="pill ok run" title="正在运行">' + esc(command) + "</span>";
+      }
       function updateTimes() {
         for (const cell of document.querySelectorAll("[data-ts]")) {
           cell.textContent = relTime(cell.dataset.ts);
+        }
+        for (const cell of document.querySelectorAll("[data-activity-cmd]")) {
+          cell.innerHTML = activityPillHtml(cell.dataset.activityCmd, cell.dataset.activityAt || "");
         }
       }
       let gen = 0;
@@ -774,6 +820,7 @@ function styles() {
     .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
     @media (prefers-reduced-motion: no-preference) {
       .live-dot { animation: live-pulse 2.4s ease-in-out infinite; }
+      .pill.run::before { animation: live-pulse 1.6s ease-in-out infinite; }
       @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     }
     .live-dot.bad { background: var(--bad); animation: none; }
@@ -830,6 +877,7 @@ function styles() {
     .window-tab.is-active { border-color: var(--accent); color: var(--accent); background: var(--accent-soft); }
     .window-tab.is-active span { color: var(--accent); opacity: 0.75; }
     .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 13px; }
+    .terminal-status { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
     .terminal-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
     #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; overscroll-behavior: contain; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }

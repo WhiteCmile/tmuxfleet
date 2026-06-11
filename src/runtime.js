@@ -55,7 +55,10 @@ export async function listSessions() {
       cwd: pane.currentPath || "",
       command: pane.currentCommand || "",
       status: Number(attached || 0) > 0 ? "attached" : "detached",
-      lastUpdated: Number(activity || 0) ? new Date(Number(activity) * 1000).toISOString() : null
+      lastUpdated: Number(activity || 0) ? new Date(Number(activity) * 1000).toISOString() : null,
+      // window_activity of the active window: session_activity only tracks
+      // client interaction, not pane output, so it cannot detect stalls.
+      activityAt: pane.windowActivity ? new Date(pane.windowActivity * 1000).toISOString() : null
     });
   }
   return rows;
@@ -67,13 +70,20 @@ export async function activePane(sessionName) {
 }
 
 export async function activePaneTarget(target) {
-  const format = "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}";
+  const format = "#{pane_current_path}\t#{pane_current_command}\t#{pane_pid}\t#{window_activity}";
   try {
     const { stdout } = await execFileAsync("tmux", ["display-message", "-p", "-t", target, format]);
-    const [currentPath, currentCommand, panePid] = stdout.trim().split("\t");
-    return { currentPath, currentCommand, panePid: Number(panePid || 0) };
+    // Split before trimming: an empty first field (e.g. unreadable cwd) starts
+    // the line with a tab that trim() would eat, shifting every field left.
+    const [currentPath, currentCommand, panePid, windowActivity] = stdout.split("\n")[0].split("\t");
+    return {
+      currentPath,
+      currentCommand,
+      panePid: Number(panePid || 0),
+      windowActivity: Number(windowActivity || 0)
+    };
   } catch {
-    return { currentPath: "", currentCommand: "", panePid: 0 };
+    return { currentPath: "", currentCommand: "", panePid: 0, windowActivity: 0 };
   }
 }
 
@@ -159,15 +169,21 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
   return stdout.replace(/\s+$/u, "");
 }
 
-export async function paneInMode(name, windowIndex = "") {
+export async function paneStatus(name, windowIndex = "") {
   assertSessionName(name);
   if (!(await sessionExists(name))) {
     const error = new Error(`tmux session not found: ${name}`);
     error.statusCode = 404;
     throw error;
   }
-  const { stdout } = await execFileAsync("tmux", ["display-message", "-p", "-t", tmuxTarget(name, windowIndex), "#{pane_in_mode}"]);
-  return stdout.trim() === "1";
+  const format = "#{pane_in_mode}\t#{pane_current_command}\t#{window_activity}";
+  const { stdout } = await execFileAsync("tmux", ["display-message", "-p", "-t", tmuxTarget(name, windowIndex), format]);
+  const [inMode, command, activity] = stdout.split("\n")[0].split("\t");
+  return {
+    inMode: inMode === "1",
+    command: command || "",
+    activityAt: Number(activity || 0) ? new Date(Number(activity) * 1000).toISOString() : null
+  };
 }
 
 export async function resizeWindow(name, cols, rows, windowIndex = "") {

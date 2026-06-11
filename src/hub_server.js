@@ -15,7 +15,7 @@ import {
   killSession,
   listSessions,
   listWindows,
-  paneInMode,
+  paneStatus,
   resizeWindow,
   sendMessage
 } from "./runtime.js";
@@ -306,17 +306,26 @@ async function sessionOutputPayload(node, name, lines, windowIndex = "") {
   if (node.mode === "local") {
     return {
       output: await captureOutput(name, lines, windowIndex),
-      inMode: await paneInMode(name, windowIndex)
+      ...(await paneStatus(name, windowIndex))
     };
   }
   const query = new URLSearchParams({ lines: String(lines) });
   if (windowIndex !== "") query.set("window", String(windowIndex));
   if (node.mode === "connected") {
     const payload = await requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-    return { output: payload.output || "", inMode: !!payload.inMode };
+    return normalizeOutputPayload(payload);
   }
   const payload = await requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-  return { output: payload.output || "", inMode: !!payload.inMode };
+  return normalizeOutputPayload(payload);
+}
+
+function normalizeOutputPayload(payload) {
+  return {
+    output: payload.output || "",
+    inMode: !!payload.inMode,
+    command: payload.command || "",
+    activityAt: payload.activityAt || null
+  };
 }
 
 async function sendNodeMessage(node, name, text, windowIndex = "") {

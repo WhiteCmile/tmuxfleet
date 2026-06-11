@@ -9,7 +9,7 @@ import {
   killSession,
   listSessions,
   listWindows,
-  paneInMode,
+  paneStatus,
   resizeWindow,
   sendMessage,
   tmuxAvailable
@@ -51,7 +51,7 @@ export function startNodeServer({ host, port }) {
       url.searchParams.get("lines") || 160,
       windowIndex
     );
-    sendJson(res, 200, { output, inMode: await paneInMode(params.name, windowIndex) });
+    sendJson(res, 200, { output, ...(await paneStatus(params.name, windowIndex)) });
   }));
 
   app.add("POST", "/api/sessions/:name/send", withNodeAuth(async ({ res, params, body }) => {
@@ -137,7 +137,7 @@ async function runNodeCommand(command) {
         url.searchParams.get("lines") || 160,
         windowIndex
       );
-      return { ok: true, status: 200, payload: { output, inMode: await paneInMode(sessionName, windowIndex) } };
+      return { ok: true, status: 200, payload: { output, ...(await paneStatus(sessionName, windowIndex)) } };
     }
     if (method === "POST" && parts[3] === "send") {
       await sendMessage(sessionName, body.text, body.window || "");

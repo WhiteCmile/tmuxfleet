@@ -12,6 +12,7 @@ Node 之间代理请求。
 
 - 列出本机和远程 Node 上的 tmux sessions。
 - Dashboard 自动刷新：session 和节点的状态、数量、更新时间原地刷新，无需手动刷新页面。
+- 每个 session 的活动指示：显示前台命令（例如正在运行的 agent），标记空闲 shell，超过 60 秒没有新输出时标红提示可能卡住。
 - Web UI 跟随系统浅色/深色主题。
 - 用指定工作目录和命令创建 session。
 - 在浏览器里打开 session，并发送按行输入。
