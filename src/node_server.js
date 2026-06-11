@@ -9,6 +9,7 @@ import {
   killSession,
   listSessions,
   listWindows,
+  paneInMode,
   resizeWindow,
   sendMessage,
   tmuxAvailable
@@ -44,12 +45,13 @@ export function startNodeServer({ host, port }) {
   }));
 
   app.add("GET", "/api/sessions/:name/output", withNodeAuth(async ({ res, params, url }) => {
+    const windowIndex = url.searchParams.get("window") || "";
     const output = await captureOutput(
       params.name,
       url.searchParams.get("lines") || 160,
-      url.searchParams.get("window") || ""
+      windowIndex
     );
-    sendJson(res, 200, { output });
+    sendJson(res, 200, { output, inMode: await paneInMode(params.name, windowIndex) });
   }));
 
   app.add("POST", "/api/sessions/:name/send", withNodeAuth(async ({ res, params, body }) => {
@@ -129,12 +131,13 @@ async function runNodeCommand(command) {
       return { ok: true, status: 200, payload: { windows: await listWindows(sessionName) } };
     }
     if (method === "GET" && parts[3] === "output") {
+      const windowIndex = url.searchParams.get("window") || "";
       const output = await captureOutput(
         sessionName,
         url.searchParams.get("lines") || 160,
-        url.searchParams.get("window") || ""
+        windowIndex
       );
-      return { ok: true, status: 200, payload: { output } };
+      return { ok: true, status: 200, payload: { output, inMode: await paneInMode(sessionName, windowIndex) } };
     }
     if (method === "POST" && parts[3] === "send") {
       await sendMessage(sessionName, body.text, body.window || "");

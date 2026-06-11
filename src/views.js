@@ -325,6 +325,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
         if (!response.ok) return;
         const body = await response.json();
+        if (body.inMode) return;
         function p256(n) {
           if (n < 16) { var c=["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n]||"#e4e7ec"; }
           if (n < 232) { n-=16; var r=Math.floor(n/36),g=Math.floor((n%36)/6),b=n%6; return "#"+[r?String(55+r*40).padStart(2,"0"):"00",g?String(55+g*40).padStart(2,"0"):"00",b?String(55+b*40).padStart(2,"0"):"00"].join(""); }
@@ -357,9 +358,12 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
             }
           }
         }
+        const previousScrollTop = terminal.scrollTop;
         terminal.innerHTML = out.join("");
         if (autoscroll) {
           terminal.scrollTop = terminal.scrollHeight;
+        } else {
+          terminal.scrollTop = previousScrollTop;
         }
         } catch(e) { terminal.textContent = "[refresh error] " + (e.message || String(e)); }
       }
