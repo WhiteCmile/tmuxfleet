@@ -330,10 +330,27 @@ async function sessionTranscript(node, name, lines, windowIndex = "") {
   }
   const query = new URLSearchParams({ lines: String(lines) });
   if (windowIndex !== "") query.set("window", String(windowIndex));
-  if (node.mode === "connected") {
-    return requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+  try {
+    if (node.mode === "connected") {
+      return await requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+    }
+    return await requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+  } catch (error) {
+    const fallback = await sessionOutputPayload(node, name, lines, windowIndex);
+    return transcriptFallback(fallback.output || "");
   }
-  return requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+}
+
+function transcriptFallback(output) {
+  const text = String(output || "").trim();
+  return {
+    messages: text ? [{ role: "agent", text, time: 0, id: "" }] : [],
+    reply: text,
+    completedReply: text,
+    working: false,
+    workingLabel: "",
+    final: !!text
+  };
 }
 
 async function sendNodeMessage(node, name, text, windowIndex = "") {
