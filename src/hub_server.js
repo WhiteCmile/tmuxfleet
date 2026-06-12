@@ -266,7 +266,29 @@ export async function collectNodeViews() {
 
 async function withNodeName(node, sessionsOrPromise) {
   const sessions = await sessionsOrPromise;
-  return sessions.map((session) => ({ ...session, node: node.name }));
+  return sessions.map((session) => ({ ...normalizeListedSession(session), node: node.name }));
+}
+
+export function normalizeListedSession(session) {
+  const normalized = { ...(session || {}) };
+  const name = String(normalized.name || "");
+  const metadataAlreadyParsed = Number(normalized.windows || 0) > 0 && Number(normalized.created || 0) > 0;
+  if (metadataAlreadyParsed) return normalized;
+
+  const match = /^(.*)_([1-9]\d*)_([01])_(\d{9,})_(\d{9,})$/u.exec(name);
+  if (!match) return normalized;
+
+  const [, cleanName, windows, attached, activity, created] = match;
+  if (!cleanName) return normalized;
+  return {
+    ...normalized,
+    name: cleanName,
+    windows: Number(windows),
+    attached: Number(attached),
+    activity: Number(activity),
+    created: Number(created),
+    lastUpdated: new Date(Number(activity) * 1000).toISOString()
+  };
 }
 
 async function createNodeSession(node, payload) {
