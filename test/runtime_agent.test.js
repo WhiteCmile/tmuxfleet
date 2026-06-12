@@ -5,6 +5,7 @@ import {
   assertSessionName,
   inferAgentProcessFromRows,
   parseSessionListOutput,
+  sendTargetForRows,
   selectTranscriptPaneFromRows
 } from "../src/runtime.js";
 
@@ -111,4 +112,17 @@ test("selectTranscriptPaneFromRows falls back to the active pane without an agen
     pane: panes[0],
     agent: { cli: "", pid: 0 }
   });
+});
+
+test("sendTargetForRows targets the agent pane instead of the active shell pane", () => {
+  const panes = [
+    { currentCommand: "bash", panePid: 10, paneIndex: 0, active: true },
+    { currentCommand: "node", panePid: 20, paneIndex: 1, active: false }
+  ];
+  const rows = [
+    { pid: 30, ppid: 20, command: "codex" }
+  ];
+
+  assert.equal(sendTargetForRows("agent", "0", panes, rows), "agent:0.1");
+  assert.equal(sendTargetForRows("agent", "", panes, rows), "agent:.1");
 });

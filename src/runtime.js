@@ -94,16 +94,18 @@ async function listPanesTarget(target) {
     "#{pane_current_path}",
     "#{pane_current_command}",
     "#{pane_pid}",
+    "#{pane_index}",
     "#{pane_active}"
   ].join("\t");
   try {
     const { stdout } = await execFileAsync("tmux", ["list-panes", "-t", target, "-F", format]);
     return stdout.trim().split("\n").filter(Boolean).map((line) => {
-      const [currentPath, currentCommand, panePid, active] = line.split("\t");
+      const [currentPath, currentCommand, panePid, paneIndex, active] = line.split("\t");
       return {
         currentPath: currentPath || "",
         currentCommand: currentCommand || "",
         panePid: Number(panePid || 0),
+        paneIndex: Number(paneIndex || 0),
         active: active === "1"
       };
     });
@@ -248,6 +250,18 @@ export function selectTranscriptPaneFromRows(panes, rows) {
   };
 }
 
+export function sendTargetForRows(sessionName, windowIndex, panes, rows) {
+  const selected = selectTranscriptPaneFromRows(panes, rows);
+  const pane = selected.pane || null;
+  if (!pane || !selected.agent?.cli) return tmuxTarget(sessionName, windowIndex);
+  const paneIndex = Number(pane.paneIndex);
+  if (!Number.isInteger(paneIndex) || paneIndex < 0) return tmuxTarget(sessionName, windowIndex);
+  if (windowIndex === "" || windowIndex === null || windowIndex === undefined) {
+    return `${tmuxTarget(sessionName)}:.${paneIndex}`;
+  }
+  return `${tmuxTarget(sessionName, windowIndex)}.${paneIndex}`;
+}
+
 function findDescendantAgent(children, panePid, preferredCli = "") {
   const frontier = [{ pid: Number(panePid || 0), depth: 0 }];
   while (frontier.length) {
@@ -310,9 +324,14 @@ export async function sendMessage(name, text, windowIndex = "") {
     error.statusCode = 404;
     throw error;
   }
-  const target = tmuxTarget(name, windowIndex);
+  const target = sendTargetForRows(
+    name,
+    windowIndex,
+    await listPanesTarget(tmuxTarget(name, windowIndex)),
+    await processRows()
+  );
   await execFileAsync("tmux", ["send-keys", "-t", target, "-l", message]);
-  await execFileAsync("tmux", ["send-keys", "-t", target, "Enter"]);
+  await execFileAsync("tmux", ["send-keys", "-t", target, "C-m"]);
 }
 
 export async function sendRawInput(name, data, windowIndex = "") {
