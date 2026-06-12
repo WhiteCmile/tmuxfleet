@@ -75,6 +75,56 @@ test("parseCodexJsonlTranscript reports working after a later user turn", () => 
   assert.equal(state.workingLabel, "Working");
 });
 
+test("parseCodexJsonlTranscript ignores Codex environment and AGENTS metadata user events", () => {
+  const jsonl = [
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:00.000Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "<environment_context>\n  <cwd>/repo</cwd>\n</environment_context>" }]
+      }
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:01.000Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "# AGENTS.md instructions for /repo\n\n<INSTRUCTIONS>\nUse npm run check.\n</INSTRUCTIONS>" }]
+      }
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:01.500Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "<turn_aborted>\nThe user interrupted the previous turn.\n</turn_aborted>" }]
+      }
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:02.000Z",
+      payload: {
+        type: "message",
+        role: "user",
+        content: [{ type: "input_text", text: "please fix the parser" }]
+      }
+    })
+  ].join("\n");
+
+  assert.deepEqual(parseCodexJsonlTranscript(jsonl).messages, [
+    {
+      role: "user",
+      text: "please fix the parser",
+      time: 1781226002000,
+      id: "codex:4"
+    }
+  ]);
+});
+
 test("parseClaudeJsonlTranscript ignores meta and tool-result user events", () => {
   const jsonl = [
     JSON.stringify({

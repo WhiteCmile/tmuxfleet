@@ -79,6 +79,29 @@ export async function activePaneTarget(target) {
   }
 }
 
+async function listPanesTarget(target) {
+  const format = [
+    "#{pane_current_path}",
+    "#{pane_current_command}",
+    "#{pane_pid}",
+    "#{pane_active}"
+  ].join("\t");
+  try {
+    const { stdout } = await execFileAsync("tmux", ["list-panes", "-t", target, "-F", format]);
+    return stdout.trim().split("\n").filter(Boolean).map((line) => {
+      const [currentPath, currentCommand, panePid, active] = line.split("\t");
+      return {
+        currentPath: currentPath || "",
+        currentCommand: currentCommand || "",
+        panePid: Number(panePid || 0),
+        active: active === "1"
+      };
+    });
+  } catch {
+    return [];
+  }
+}
+
 export async function listWindows(sessionName) {
   assertSessionName(sessionName);
   if (!(await sessionExists(sessionName))) {
@@ -163,8 +186,11 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
 
 export async function sessionTranscriptState(name, lines = 500, windowIndex = "") {
   const output = await captureOutput(name, lines, windowIndex);
-  const pane = await activePaneTarget(tmuxTarget(name, windowIndex));
-  const agent = await inferAgentProcess(pane.currentCommand || "", pane.panePid || 0);
+  const target = tmuxTarget(name, windowIndex);
+  const panes = await listPanesTarget(target);
+  const selected = selectTranscriptPaneFromRows(panes, await processRows());
+  const pane = selected.pane || await activePaneTarget(target);
+  const agent = selected.agent || { cli: "", pid: 0 };
   return transcriptState({
     output,
     cli: agent.cli || pane.currentCommand || "",
@@ -191,6 +217,25 @@ export function inferAgentProcessFromRows(currentCommand, panePid, rows) {
   if (descendant.cli) return descendant;
   if (direct) return { cli: direct, pid: Number(panePid || 0) };
   return { cli: "", pid: 0 };
+}
+
+export function selectTranscriptPaneFromRows(panes, rows) {
+  const list = Array.isArray(panes) ? panes.filter((pane) => pane && Number(pane.panePid || 0)) : [];
+  const activePane = list.find((pane) => pane.active) || list[0] || null;
+  const ordered = [
+    ...list.filter((pane) => pane === activePane),
+    ...list.filter((pane) => pane !== activePane)
+  ];
+
+  for (const pane of ordered) {
+    const agent = inferAgentProcessFromRows(pane.currentCommand || "", pane.panePid || 0, rows);
+    if (agent.cli) return { pane, agent };
+  }
+
+  return {
+    pane: activePane,
+    agent: { cli: "", pid: 0 }
+  };
 }
 
 function findDescendantAgent(children, panePid, preferredCli = "") {

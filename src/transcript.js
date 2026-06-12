@@ -27,6 +27,7 @@ export function parseCodexJsonlTranscript(text) {
   }
   const messages = events
     .filter((event) => event.kind === "user" || event.kind === "assistant_final")
+    .filter((event) => event.kind !== "user" || isMeaningfulCodexUserText(event.text))
     .map((event) => ({
       role: event.kind === "user" ? "user" : "agent",
       text: event.text,
@@ -170,6 +171,17 @@ function codexEventFromJson(item, lineNumber) {
     return text ? { kind: "assistant_final", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
   }
   return null;
+}
+
+function isMeaningfulCodexUserText(text) {
+  const value = String(text || "").trim();
+  if (!value) return false;
+  return ![
+    /^<environment_context>[\s\S]*<\/environment_context>$/i,
+    /^<turn_aborted>[\s\S]*<\/turn_aborted>$/i,
+    /^# AGENTS\.md instructions for\b/i,
+    /^<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/i
+  ].some((pattern) => pattern.test(value));
 }
 
 function claudeMessagesFromEvents(events) {
