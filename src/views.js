@@ -175,37 +175,69 @@ function splitChatBlocks(output) {
   const lines = text.split("\n");
   const blocks = [];
   let current = [];
+  let currentRole = "";
   for (const line of lines) {
     const trimmed = line.trim();
-    const startsPrompt = /^(>|\$|#|❯|➜)\s+/.test(trimmed) || /^\[?(user|assistant|system|tool|error)\]?[:：]/i.test(trimmed);
-    if ((startsPrompt || trimmed === "") && current.some((item) => item.trim())) {
-      blocks.push(current.join("\n").trimEnd());
+    if (isHiddenOutputLine(trimmed)) continue;
+    const role = chatLineRole(trimmed);
+    if (trimmed === "" && !current.some((item) => item.trim())) continue;
+    const startsBlock = trimmed !== "" && (role !== "agent" || currentRole === "user");
+    if (startsBlock && current.some((item) => item.trim())) {
+      blocks.push({ role: currentRole || chatRole(current.join("\n")), text: current.join("\n").trimEnd() });
       current = [];
-      if (trimmed === "") continue;
+      currentRole = "";
     }
     current.push(line);
+    if (trimmed !== "" && !currentRole) currentRole = role;
   }
-  if (current.some((item) => item.trim())) blocks.push(current.join("\n").trimEnd());
+  if (current.some((item) => item.trim())) {
+    blocks.push({ role: currentRole || chatRole(current.join("\n")), text: current.join("\n").trimEnd() });
+  }
   return blocks.slice(-80);
+}
+
+function isHiddenOutputLine(line) {
+  if (!line) return false;
+  return [
+    /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\s*[:=]/i,
+    /^system:\s*you are (codex|chatgpt|an ai|a coding agent)/i,
+    /^you are (codex|chatgpt|an ai|a coding agent)/i,
+    /^<[/]?(instructions|environment_context|workspace_roots|filesystem)>$/i,
+    /^(agent instructions|environment_context|filesystem sandboxing|sandbox_mode|approval_policy)\b/i,
+    /^current date\s*[:=]/i
+  ].some((pattern) => pattern.test(line));
+}
+
+function chatLineRole(line) {
+  if (/^(>|\$|❯|➜)\s+/.test(line) || /^\[?user\]?[:：]/i.test(line)) return "user";
+  if (/^error[:：]/i.test(line) || /error|failed|exception|traceback|timed out|connection/i.test(line)) return "error";
+  if (/^\[?(system|tool)\]?[:：]/i.test(line)) return "system";
+  return "agent";
 }
 
 function chatRole(block) {
   const first = block.trimStart().split("\n")[0] || "";
-  if (/^(>|\$|#|❯|➜)\s+/.test(first) || /^\[?user\]?[:：]/i.test(first)) return "user";
+  if (/^(>|\$|❯|➜)\s+/.test(first) || /^\[?user\]?[:：]/i.test(first)) return "user";
   if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
   if (/^\[?(system|tool)\]?[:：]/i.test(first)) return "system";
   return "agent";
 }
 
-function renderChatMessages(output) {
-  const blocks = splitChatBlocks(output);
-  if (!blocks.length) return `<div class="empty chat-empty">暂无输出</div>`;
-  return blocks.map((block) => {
-    const role = chatRole(block);
+export function chatMessagesFromOutput(output) {
+  return splitChatBlocks(output).map((block) => {
+    const role = block.role || chatRole(block.text);
     const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
+    return { role, label, text: block.text };
+  });
+}
+
+export function renderChatMessages(output) {
+  const blocks = chatMessagesFromOutput(output);
+  if (!blocks.length) return `<div class="empty chat-empty">暂无输出</div>`;
+  return blocks.map(({ role, label, text }) => {
     return `<article class="chat-message ${role}">
       <div class="chat-role">${label}</div>
-      <pre>${escapeHtml(block)}</pre>
+      <pre>${escapeHtml(text)}</pre>
     </article>`;
   }).join("");
 }
@@ -242,6 +274,10 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         </span>
       </div>
       <div id="chat-log" class="chat-log" tabindex="0">${renderChatMessages(output)}</div>
+      <details class="raw-output">
+        <summary>查看原始输出</summary>
+        <pre id="raw-output-text">${escapeHtml(output || "")}</pre>
+      </details>
       <form id="send-message" class="chat-input">
         <input name="text" autocomplete="off" autofocus placeholder="输入一行内容后按回车">
         <button type="submit">发送</button>
@@ -301,23 +337,47 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const lines = text.split("\\n");
         const blocks = [];
         let current = [];
+        let currentRole = "";
         for (const line of lines) {
           const trimmed = line.trim();
-          const startsPrompt = /^(>|\\$|#|❯|➜)\\s+/.test(trimmed) || /^\\[?(user|assistant|system|tool|error)\\]?[:：]/i.test(trimmed);
-          if ((startsPrompt || trimmed === "") && current.some((item) => item.trim())) {
-            blocks.push(current.join("\\n").trimEnd());
+          if (isHiddenOutputLine(trimmed)) continue;
+          const role = chatLineRole(trimmed);
+          if (trimmed === "" && !current.some((item) => item.trim())) continue;
+          const startsBlock = trimmed !== "" && (role !== "agent" || currentRole === "user");
+          if (startsBlock && current.some((item) => item.trim())) {
+            blocks.push({role: currentRole || blockRole(current.join("\\n")), text: current.join("\\n").trimEnd()});
             current = [];
-            if (trimmed === "") continue;
+            currentRole = "";
           }
           current.push(line);
+          if (trimmed !== "" && !currentRole) currentRole = role;
         }
-        if (current.some((item) => item.trim())) blocks.push(current.join("\\n").trimEnd());
+        if (current.some((item) => item.trim())) blocks.push({role: currentRole || blockRole(current.join("\\n")), text: current.join("\\n").trimEnd()});
         return blocks.slice(-80);
+      }
+
+      function isHiddenOutputLine(line) {
+        if (!line) return false;
+        return [
+          /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\\s*[:=]/i,
+          /^system:\\s*you are (codex|chatgpt|an ai|a coding agent)/i,
+          /^you are (codex|chatgpt|an ai|a coding agent)/i,
+          /^<[/]?(instructions|environment_context|workspace_roots|filesystem)>$/i,
+          /^(agent instructions|environment_context|filesystem sandboxing|sandbox_mode|approval_policy)\\b/i,
+          /^current date\\s*[:=]/i
+        ].some((pattern) => pattern.test(line));
+      }
+
+      function chatLineRole(line) {
+        if (/^(>|\\$|❯|➜)\\s+/.test(line) || /^\\[?user\\]?[:：]/i.test(line)) return "user";
+        if (/^error[:：]/i.test(line) || /error|failed|exception|traceback|timed out|connection/i.test(line)) return "error";
+        if (/^\\[?(system|tool)\\]?[:：]/i.test(line)) return "system";
+        return "agent";
       }
 
       function blockRole(block) {
         const first = block.trimStart().split("\\n")[0] || "";
-        if (/^(>|\\$|#|❯|➜)\\s+/.test(first) || /^\\[?user\\]?[:：]/i.test(first)) return "user";
+        if (/^(>|\\$|❯|➜)\\s+/.test(first) || /^\\[?user\\]?[:：]/i.test(first)) return "user";
         if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
         if (/^\\[?(system|tool)\\]?[:：]/i.test(first)) return "system";
         return "agent";
@@ -329,9 +389,9 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           return '<div class="empty chat-empty">暂无输出</div>';
         }
         return blocks.map((block) => {
-          const role = blockRole(block);
+          const role = block.role || blockRole(block.text);
           const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
-          return '<article class="chat-message ' + role + '"><div class="chat-role">' + label + '</div><pre>' + escapeText(block) + '</pre></article>';
+          return '<article class="chat-message ' + role + '"><div class="chat-role">' + label + '</div><pre>' + escapeText(block.text) + '</pre></article>';
         }).join("");
       }
 
@@ -345,6 +405,8 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         if (body.inMode) return;
         const previousScrollTop = chatLog.scrollTop;
         chatLog.innerHTML = renderChat(body.output || "");
+        const rawOutput = document.querySelector("#raw-output-text");
+        if (rawOutput) rawOutput.textContent = body.output || "";
         if (autoscroll) {
           chatLog.scrollTop = chatLog.scrollHeight;
         } else {
@@ -588,6 +650,9 @@ function styles() {
     .chat-role { color: #667085; font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0; }
     .chat-message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; color: #182230; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .chat-empty { padding: 20px; }
+    .raw-output { border-top: 1px solid var(--line); background: #fff; }
+    .raw-output summary { cursor: pointer; padding: 9px 12px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .raw-output pre { max-height: 260px; overflow: auto; margin: 0; padding: 12px; border-top: 1px solid #edf1f6; background: #fbfcfe; color: #344054; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .chat-input { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #fff; }
 
     @media (max-width: 760px) {
