@@ -51,6 +51,21 @@ node src/cli.js hub --host 0.0.0.0 --port 8090
 
 `TMUXFLEET_HUB_TOKEN` is required when binding the Hub to a non-loopback address.
 
+## Auto-Update Wrapper
+
+For long-running Hub or Node processes, use the auto-update wrapper. It starts
+the command, periodically checks the current Git upstream, and restarts the
+process after a clean fast-forward pull:
+
+```bash
+scripts/run-with-autoupdate.sh -- node src/cli.js hub --host 0.0.0.0 --port 8090
+```
+
+The wrapper only updates when the working tree is clean and the local branch can
+fast-forward. It skips updates when local changes exist or the branch has
+diverged. Set `TMUXFLEET_UPDATE_INTERVAL` or pass `--interval seconds` to change
+the default 60 second check interval.
+
 ## Connected Nodes
 
 Connected Node mode is recommended for remote machines behind NAT or firewalls.
@@ -75,6 +90,12 @@ cd /agent-dev/tmuxfleet
 
 export TMUXFLEET_NODE_TOKEN="<shared node token>"
 node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
+```
+
+With auto-update:
+
+```bash
+scripts/run-with-autoupdate.sh -- node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
 ```
 
 Use a different `--name` for each machine. The Node appears automatically on

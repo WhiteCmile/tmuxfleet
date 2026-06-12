@@ -149,7 +149,7 @@ export async function killSession(name) {
 
 export async function captureOutput(name, lines = 160, windowIndex = "") {
   assertSessionName(name);
-  const safeLines = Math.max(20, Math.min(Number(lines || 160), 500));
+  const safeLines = Math.max(20, Math.min(Number(lines || 160), 2000));
   if (!(await sessionExists(name))) {
     const error = new Error(`tmux session not found: ${name}`);
     error.statusCode = 404;
@@ -168,31 +168,6 @@ export async function paneInMode(name, windowIndex = "") {
   }
   const { stdout } = await execFileAsync("tmux", ["display-message", "-p", "-t", tmuxTarget(name, windowIndex), "#{pane_in_mode}"]);
   return stdout.trim() === "1";
-}
-
-export async function resizeWindow(name, cols, rows, windowIndex = "") {
-  assertSessionName(name);
-  const safeCols = Math.max(40, Math.min(Number(cols || 0), 300));
-  const safeRows = Math.max(10, Math.min(Number(rows || 0), 120));
-  if (!Number.isFinite(safeCols) || !Number.isFinite(safeRows)) {
-    const error = new Error("Terminal size must include numeric cols and rows");
-    error.statusCode = 400;
-    throw error;
-  }
-  if (!(await sessionExists(name))) {
-    const error = new Error(`tmux session not found: ${name}`);
-    error.statusCode = 404;
-    throw error;
-  }
-  await execFileAsync("tmux", [
-    "resize-window",
-    "-t",
-    tmuxTarget(name, windowIndex),
-    "-x",
-    String(Math.round(safeCols)),
-    "-y",
-    String(Math.round(safeRows))
-  ]);
 }
 
 export async function sendMessage(name, text, windowIndex = "") {

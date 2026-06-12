@@ -16,7 +16,6 @@ import {
   listSessions,
   listWindows,
   paneInMode,
-  resizeWindow,
   sendMessage
 } from "./runtime.js";
 import {
@@ -102,7 +101,7 @@ export function startHubServer({ host, port }) {
     const node = findHubNode(params.node);
     const selectedWindow = url.searchParams.get("window") || "";
     const windows = await sessionWindows(node, params.name);
-    const output = await sessionOutput(node, params.name, 500, selectedWindow);
+    const output = await sessionOutput(node, params.name, 2000, selectedWindow);
     const autoRecoverConfig = loadAutoRecoverSessions()[`${node.name}/${params.name}`] || null;
     const views = await loadViews();
     sendHtml(res, 200, views.renderSessionPage({
@@ -168,13 +167,6 @@ export function startHubServer({ host, port }) {
     const payload = await body();
     await sendNodeMessage(node, params.name, payload.text, payload.window || "");
     sendJson(res, 200, { status: "sent" });
-  }));
-
-  app.add("POST", "/api/sessions/:node/:name/resize", requireHubAuth(async ({ res, params, body }) => {
-    const node = findHubNode(params.node);
-    const payload = await body();
-    await resizeNodeWindow(node, params.name, payload.cols, payload.rows, payload.window || "");
-    sendJson(res, 200, { status: "resized" });
   }));
 
   app.add("PUT", "/api/sessions/:node/:name/hide", requireHubAuth(async ({ res, params, body }) => {
@@ -335,19 +327,6 @@ async function sendNodeMessage(node, name, text, windowIndex = "") {
     text,
     window: windowIndex
   });
-}
-
-async function resizeNodeWindow(node, name, cols, rows, windowIndex = "") {
-  if (node.mode === "local") {
-    await resizeWindow(name, cols, rows, windowIndex);
-    return;
-  }
-  const body = { cols, rows, window: windowIndex };
-  if (node.mode === "connected") {
-    await requestConnectedNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
-    return;
-  }
-  await requestNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
 }
 
 function startAutoRecoverLoop() {

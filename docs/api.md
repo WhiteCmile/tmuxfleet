@@ -11,7 +11,6 @@
 - `GET /api/sessions/:name/windows`
 - `GET /api/sessions/:name/output?window=0&lines=500`
 - `POST /api/sessions/:name/send`
-- `POST /api/sessions/:name/resize`
 
 ## Hub
 
@@ -24,7 +23,6 @@
 - `GET /api/sessions/:node/:name/windows`
 - `GET /api/sessions/:node/:name/output?window=0&lines=500`
 - `POST /api/sessions/:node/:name/send`
-- `POST /api/sessions/:node/:name/resize`
 - `PUT /api/sessions/:node/:name/hide`
 - `PUT /api/sessions/:node/:name/autorecover`
 - `GET /api/nodes`

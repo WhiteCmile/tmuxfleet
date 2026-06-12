@@ -4,17 +4,15 @@
 
 tmuxfleet 是一个小型 Hub + Node 控制台，用来跨机器管理 tmux sessions。
 
-tmux 始终是事实来源。tmuxfleet 负责列出 session、创建 session、抓取输出、
-发送输入、把 tmux window resize 到浏览器终端区域大小，以及在浏览器、Hub、
-Node 之间代理请求。
+tmux 始终是事实来源。tmuxfleet 负责列出 session、创建 session、把输出抓取成
+适合浏览器阅读的 chat/log 视图、发送输入，以及在浏览器、Hub、Node 之间代理请求。
 
 ## 功能
 
 - 列出本机和远程 Node 上的 tmux sessions。
 - 用指定工作目录和命令创建 session。
-- 在浏览器里打开 session，并发送按行输入。
+- 在浏览器友好的 chat/log 视图里打开 session，并发送按行输入。
 - 在同一个 tmux session 的多个 window 之间切换。
-- 按浏览器终端区域动态调整 tmux window 尺寸。
 - 可选地为指定 agent session 开启 API 或网络错误后的自动恢复。
 - 从 Dashboard 停止 tmux sessions。
 
