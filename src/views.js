@@ -283,7 +283,23 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
       const chatLog = document.querySelector("#chat-log");
       const initialTranscriptMessages = ${scriptJson(transcript?.messages || [])};
+      const sendForm = document.querySelector("#send-message");
+      const sendInput = sendForm.elements.text;
+      const sendButton = sendForm.querySelector("button[type='submit']");
+      const sendStatus = document.querySelector("#send-status");
+      let agentWorking = ${JSON.stringify(!!transcript?.working)};
+      let sending = false;
       let autoscroll = true;
+
+      function updateSendControls() {
+        sendInput.disabled = sending;
+        sendButton.disabled = sending || agentWorking;
+        if (!sending && agentWorking) {
+          sendStatus.textContent = "Agent 正在工作，结束后再发送";
+        } else if (!sending && sendStatus.textContent === "Agent 正在工作，结束后再发送") {
+          sendStatus.textContent = "";
+        }
+      }
 
       chatLog.addEventListener("scroll", () => {
         autoscroll = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 20;
@@ -386,6 +402,8 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         const body = await outputResponse.json();
         const transcriptBody = transcriptResponse.ok ? await transcriptResponse.json().catch(() => ({})) : {};
         if (body.inMode) return;
+        agentWorking = !!transcriptBody.working;
+        updateSendControls();
         const previousScrollTop = chatLog.scrollTop;
         chatLog.innerHTML = renderMessages(transcriptBody.messages || [], body.output || "");
         const rawOutput = document.querySelector("#raw-output-text");
@@ -398,18 +416,19 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         } catch(e) { chatLog.innerHTML = '<div class="error">[refresh error] ' + escapeText(e.message || String(e)) + '</div>'; }
       }
 
-      document.querySelector("#send-message").addEventListener("submit", async (event) => {
+      sendForm.addEventListener("submit", async (event) => {
         event.preventDefault();
-        const form = event.currentTarget;
-        const input = event.currentTarget.elements.text;
-        const button = form.querySelector("button[type='submit']");
-        const status = document.querySelector("#send-status");
-        const text = input.value;
+        if (agentWorking) {
+          sendStatus.textContent = "Agent 正在工作，结束后再发送";
+          updateSendControls();
+          return;
+        }
+        const text = sendInput.value;
         if (!text.trim()) return;
-        input.value = "";
-        input.disabled = true;
-        button.disabled = true;
-        status.textContent = "正在发送...";
+        sendInput.value = "";
+        sending = true;
+        updateSendControls();
+        sendStatus.textContent = "正在发送...";
         try {
           const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/send", {
             method: "POST",
@@ -417,14 +436,14 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
             body: JSON.stringify({text, window: activeWindow})
           });
           const body = await response.json().catch(() => ({}));
-          status.textContent = response.ok ? "已发送，等待输出..." : (body.detail || "发送失败");
+          sendStatus.textContent = response.ok ? "已发送，等待输出..." : (body.detail || "发送失败");
           setTimeout(refreshOutput, 120);
         } catch (error) {
-          status.textContent = "发送失败：" + (error.message || String(error));
+          sendStatus.textContent = "发送失败：" + (error.message || String(error));
         } finally {
-          input.disabled = false;
-          button.disabled = false;
-          input.focus();
+          sending = false;
+          updateSendControls();
+          sendInput.focus();
         }
       });
       document.querySelector("#stop-session").addEventListener("click", async () => {
@@ -494,6 +513,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       if (initialTranscriptMessages.length) {
         chatLog.innerHTML = renderMessages(initialTranscriptMessages, "");
       }
+      updateSendControls();
       chatLog.scrollTop = chatLog.scrollHeight;
     </script>
   `);

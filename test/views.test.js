@@ -147,3 +147,19 @@ test("renderSessionPage safely embeds transcript messages in script JSON", () =>
   assert.doesNotMatch(html, /const initialTranscriptMessages = .*<\/script><script>/);
   assert.match(html, /\\u003c\/script\\u003e/);
 });
+
+test("renderSessionPage blocks sends while the agent transcript is working", () => {
+  const html = renderSessionPage({
+    node: { name: "local", url: "http://127.0.0.1:8091" },
+    name: "agent",
+    windows: [],
+    selectedWindow: "",
+    output: "",
+    transcript: { working: true, messages: [{ role: "user", text: "still running" }] },
+    autoRecoverConfig: null
+  });
+
+  assert.match(html, /let agentWorking = true;/);
+  assert.match(html, /sendButton\.disabled = sending \|\| agentWorking;/);
+  assert.match(html, /if \(agentWorking\)/);
+});
