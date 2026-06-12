@@ -34,25 +34,29 @@ test("chatMessagesFromOutput hides agent metadata and merges continuous output",
   ]);
 });
 
-test("chatMessagesFromOutput keeps user prompts separate from merged output", () => {
+test("chatMessagesFromOutput treats captured terminal text as output instead of guessed input", () => {
   const output = [
     "> npm run check",
     "node --check src/*.js test/*.js",
     "",
     "TAP version 13",
+    "  ---",
+    "  duration_ms: 2.2",
+    "  ...",
     "# tests 2",
     "# pass 2"
   ].join("\n");
 
   assert.deepEqual(chatMessagesFromOutput(output), [
-    { role: "user", label: "Input", text: "> npm run check" },
     {
       role: "agent",
       label: "Output",
       text: [
+        "> npm run check",
         "node --check src/*.js test/*.js",
         "",
         "TAP version 13",
+        "  duration_ms: 2.2",
         "# tests 2",
         "# pass 2"
       ].join("\n")

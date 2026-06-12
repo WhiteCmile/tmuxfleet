@@ -172,33 +172,17 @@ function stripTerminalCodes(value) {
 function splitChatBlocks(output) {
   const text = stripTerminalCodes(output).trimEnd();
   if (!text.trim()) return [];
-  const lines = text.split("\n");
-  const blocks = [];
-  let current = [];
-  let currentRole = "";
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (isHiddenOutputLine(trimmed)) continue;
-    const role = chatLineRole(trimmed);
-    if (trimmed === "" && !current.some((item) => item.trim())) continue;
-    const startsBlock = trimmed !== "" && (role !== "agent" || currentRole === "user");
-    if (startsBlock && current.some((item) => item.trim())) {
-      blocks.push({ role: currentRole || chatRole(current.join("\n")), text: current.join("\n").trimEnd() });
-      current = [];
-      currentRole = "";
-    }
-    current.push(line);
-    if (trimmed !== "" && !currentRole) currentRole = role;
-  }
-  if (current.some((item) => item.trim())) {
-    blocks.push({ role: currentRole || chatRole(current.join("\n")), text: current.join("\n").trimEnd() });
-  }
-  return blocks.slice(-80);
+  const visibleLines = text.split("\n").filter((line) => !isHiddenOutputLine(line.trim()));
+  while (visibleLines.length && !visibleLines[0].trim()) visibleLines.shift();
+  while (visibleLines.length && !visibleLines[visibleLines.length - 1].trim()) visibleLines.pop();
+  if (!visibleLines.length) return [];
+  return [{ role: "agent", text: visibleLines.join("\n") }];
 }
 
 function isHiddenOutputLine(line) {
   if (!line) return false;
   return [
+    /^(---|\.\.\.)$/,
     /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\s*[:=]/i,
     /^system:\s*you are (codex|chatgpt|an ai|a coding agent)/i,
     /^you are (codex|chatgpt|an ai|a coding agent)/i,
@@ -208,26 +192,9 @@ function isHiddenOutputLine(line) {
   ].some((pattern) => pattern.test(line));
 }
 
-function chatLineRole(line) {
-  if (/^(>|\$|❯|➜)\s+/.test(line) || /^\[?user\]?[:：]/i.test(line)) return "user";
-  if (/^error[:：]/i.test(line) || /error|failed|exception|traceback|timed out|connection/i.test(line)) return "error";
-  if (/^\[?(system|tool)\]?[:：]/i.test(line)) return "system";
-  return "agent";
-}
-
-function chatRole(block) {
-  const first = block.trimStart().split("\n")[0] || "";
-  if (/^(>|\$|❯|➜)\s+/.test(first) || /^\[?user\]?[:：]/i.test(first)) return "user";
-  if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
-  if (/^\[?(system|tool)\]?[:：]/i.test(first)) return "system";
-  return "agent";
-}
-
 export function chatMessagesFromOutput(output) {
   return splitChatBlocks(output).map((block) => {
-    const role = block.role || chatRole(block.text);
-    const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
-    return { role, label, text: block.text };
+    return { role: block.role, label: "Output", text: block.text };
   });
 }
 
@@ -334,31 +301,17 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       function splitChatBlocks(output) {
         const text = stripTerminalCodes(output).trimEnd();
         if (!text.trim()) return [];
-        const lines = text.split("\\n");
-        const blocks = [];
-        let current = [];
-        let currentRole = "";
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (isHiddenOutputLine(trimmed)) continue;
-          const role = chatLineRole(trimmed);
-          if (trimmed === "" && !current.some((item) => item.trim())) continue;
-          const startsBlock = trimmed !== "" && (role !== "agent" || currentRole === "user");
-          if (startsBlock && current.some((item) => item.trim())) {
-            blocks.push({role: currentRole || blockRole(current.join("\\n")), text: current.join("\\n").trimEnd()});
-            current = [];
-            currentRole = "";
-          }
-          current.push(line);
-          if (trimmed !== "" && !currentRole) currentRole = role;
-        }
-        if (current.some((item) => item.trim())) blocks.push({role: currentRole || blockRole(current.join("\\n")), text: current.join("\\n").trimEnd()});
-        return blocks.slice(-80);
+        const visibleLines = text.split("\\n").filter((line) => !isHiddenOutputLine(line.trim()));
+        while (visibleLines.length && !visibleLines[0].trim()) visibleLines.shift();
+        while (visibleLines.length && !visibleLines[visibleLines.length - 1].trim()) visibleLines.pop();
+        if (!visibleLines.length) return [];
+        return [{role: "agent", text: visibleLines.join("\\n")}];
       }
 
       function isHiddenOutputLine(line) {
         if (!line) return false;
         return [
+          /^(---|\\.\\.\\.)$/,
           /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\\s*[:=]/i,
           /^system:\\s*you are (codex|chatgpt|an ai|a coding agent)/i,
           /^you are (codex|chatgpt|an ai|a coding agent)/i,
@@ -368,30 +321,13 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
         ].some((pattern) => pattern.test(line));
       }
 
-      function chatLineRole(line) {
-        if (/^(>|\\$|❯|➜)\\s+/.test(line) || /^\\[?user\\]?[:：]/i.test(line)) return "user";
-        if (/^error[:：]/i.test(line) || /error|failed|exception|traceback|timed out|connection/i.test(line)) return "error";
-        if (/^\\[?(system|tool)\\]?[:：]/i.test(line)) return "system";
-        return "agent";
-      }
-
-      function blockRole(block) {
-        const first = block.trimStart().split("\\n")[0] || "";
-        if (/^(>|\\$|❯|➜)\\s+/.test(first) || /^\\[?user\\]?[:：]/i.test(first)) return "user";
-        if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
-        if (/^\\[?(system|tool)\\]?[:：]/i.test(first)) return "system";
-        return "agent";
-      }
-
       function renderChat(output) {
         const blocks = splitChatBlocks(output);
         if (!blocks.length) {
           return '<div class="empty chat-empty">暂无输出</div>';
         }
         return blocks.map((block) => {
-          const role = block.role || blockRole(block.text);
-          const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
-          return '<article class="chat-message ' + role + '"><div class="chat-role">' + label + '</div><pre>' + escapeText(block.text) + '</pre></article>';
+          return '<article class="chat-message ' + block.role + '"><div class="chat-role">Output</div><pre>' + escapeText(block.text) + '</pre></article>';
         }).join("");
       }
 
