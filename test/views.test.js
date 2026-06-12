@@ -99,3 +99,41 @@ test("renderSessionPage keeps raw output available outside the filtered chat log
   assert.match(html, /查看原始输出/);
   assert.match(html, /Model: gpt-5-codex/);
 });
+
+test("renderSessionPage prefers structured transcript messages over raw output parsing", () => {
+  const html = renderSessionPage({
+    node: { name: "local", url: "http://127.0.0.1:8091" },
+    name: "agent",
+    windows: [],
+    selectedWindow: "",
+    output: "Model: gpt-5-codex\nraw fallback",
+    transcript: {
+      messages: [
+        { role: "user", text: "please fix this" },
+        { role: "agent", text: "fixed from transcript" }
+      ]
+    },
+    autoRecoverConfig: null
+  });
+
+  assert.match(html, /<div class="chat-role">Input<\/div>/);
+  assert.match(html, /please fix this/);
+  assert.match(html, /fixed from transcript/);
+  const chatLog = html.match(/<div id="chat-log"[\s\S]*?<\/div>/)?.[0] || "";
+  assert.doesNotMatch(chatLog, /raw fallback/);
+});
+
+test("renderSessionPage safely embeds transcript messages in script JSON", () => {
+  const html = renderSessionPage({
+    node: { name: "local", url: "http://127.0.0.1:8091" },
+    name: "agent",
+    windows: [],
+    selectedWindow: "",
+    output: "",
+    transcript: { messages: [{ role: "agent", text: "</script><script>alert(1)</script>" }] },
+    autoRecoverConfig: null
+  });
+
+  assert.doesNotMatch(html, /const initialTranscriptMessages = .*<\/script><script>/);
+  assert.match(html, /\\u003c\/script\\u003e/);
+});

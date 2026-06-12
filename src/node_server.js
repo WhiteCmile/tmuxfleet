@@ -11,6 +11,7 @@ import {
   listWindows,
   paneInMode,
   sendMessage,
+  sessionTranscriptState,
   tmuxAvailable
 } from "./runtime.js";
 
@@ -51,6 +52,15 @@ export function startNodeServer({ host, port }) {
       windowIndex
     );
     sendJson(res, 200, { output, inMode: await paneInMode(params.name, windowIndex) });
+  }));
+
+  app.add("GET", "/api/sessions/:name/transcript-state", withNodeAuth(async ({ res, params, url }) => {
+    const windowIndex = url.searchParams.get("window") || "";
+    sendJson(res, 200, await sessionTranscriptState(
+      params.name,
+      url.searchParams.get("lines") || 500,
+      windowIndex
+    ));
   }));
 
   app.add("POST", "/api/sessions/:name/send", withNodeAuth(async ({ res, params, body }) => {
@@ -131,6 +141,18 @@ async function runNodeCommand(command) {
         windowIndex
       );
       return { ok: true, status: 200, payload: { output, inMode: await paneInMode(sessionName, windowIndex) } };
+    }
+    if (method === "GET" && parts[3] === "transcript-state") {
+      const windowIndex = url.searchParams.get("window") || "";
+      return {
+        ok: true,
+        status: 200,
+        payload: await sessionTranscriptState(
+          sessionName,
+          url.searchParams.get("lines") || 500,
+          windowIndex
+        )
+      };
     }
     if (method === "POST" && parts[3] === "send") {
       await sendMessage(sessionName, body.text, body.window || "");

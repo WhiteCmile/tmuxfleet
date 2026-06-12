@@ -3,6 +3,8 @@ import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
 
+import { transcriptState } from "./transcript.js";
+
 const execFileAsync = promisify(execFile);
 
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9_.:-]{1,80}$/;
@@ -157,6 +159,16 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
   }
   const { stdout } = await execFileAsync("tmux", ["capture-pane", "-e", "-t", tmuxTarget(name, windowIndex), "-p", "-S", `-${safeLines}`]);
   return stdout.replace(/\s+$/u, "");
+}
+
+export async function sessionTranscriptState(name, lines = 500, windowIndex = "") {
+  const output = await captureOutput(name, lines, windowIndex);
+  const pane = await activePaneTarget(tmuxTarget(name, windowIndex));
+  return transcriptState({
+    output,
+    cli: pane.currentCommand || "",
+    panePid: pane.panePid || 0
+  });
 }
 
 export async function paneInMode(name, windowIndex = "") {

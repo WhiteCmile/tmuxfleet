@@ -16,7 +16,8 @@ import {
   listSessions,
   listWindows,
   paneInMode,
-  sendMessage
+  sendMessage,
+  sessionTranscriptState
 } from "./runtime.js";
 import {
   bearerToken,
@@ -102,6 +103,7 @@ export function startHubServer({ host, port }) {
     const selectedWindow = url.searchParams.get("window") || "";
     const windows = await sessionWindows(node, params.name);
     const output = await sessionOutput(node, params.name, 2000, selectedWindow);
+    const transcript = await sessionTranscript(node, params.name, 500, selectedWindow);
     const autoRecoverConfig = loadAutoRecoverSessions()[`${node.name}/${params.name}`] || null;
     const views = await loadViews();
     sendHtml(res, 200, views.renderSessionPage({
@@ -110,6 +112,7 @@ export function startHubServer({ host, port }) {
       windows,
       selectedWindow,
       output,
+      transcript,
       autoRecoverConfig
     }));
   }));
@@ -160,6 +163,16 @@ export function startHubServer({ host, port }) {
       url.searchParams.get("window") || ""
     );
     sendJson(res, 200, output);
+  }));
+
+  app.add("GET", "/api/sessions/:node/:name/transcript-state", requireHubAuth(async ({ res, params, url }) => {
+    const node = findHubNode(params.node);
+    sendJson(res, 200, await sessionTranscript(
+      node,
+      params.name,
+      url.searchParams.get("lines") || 500,
+      url.searchParams.get("window") || ""
+    ));
   }));
 
   app.add("POST", "/api/sessions/:node/:name/send", requireHubAuth(async ({ res, params, body }) => {
@@ -309,6 +322,18 @@ async function sessionOutputPayload(node, name, lines, windowIndex = "") {
   }
   const payload = await requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
   return { output: payload.output || "", inMode: !!payload.inMode };
+}
+
+async function sessionTranscript(node, name, lines, windowIndex = "") {
+  if (node.mode === "local") {
+    return sessionTranscriptState(name, lines, windowIndex);
+  }
+  const query = new URLSearchParams({ lines: String(lines) });
+  if (windowIndex !== "") query.set("window", String(windowIndex));
+  if (node.mode === "connected") {
+    return requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+  }
+  return requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
 }
 
 async function sendNodeMessage(node, name, text, windowIndex = "") {

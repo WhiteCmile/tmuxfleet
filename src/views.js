@@ -209,7 +209,30 @@ export function renderChatMessages(output) {
   }).join("");
 }
 
-export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, autoRecoverConfig = null }) {
+export function renderTranscriptMessages(messages = [], fallbackOutput = "") {
+  const normalized = Array.isArray(messages)
+    ? messages.map((message) => normalizeTranscriptMessage(message)).filter(Boolean)
+    : [];
+  const blocks = normalized.length ? normalized : chatMessagesFromOutput(fallbackOutput);
+  if (!blocks.length) return `<div class="empty chat-empty">暂无输出</div>`;
+  return blocks.map(({ role, label, text }) => {
+    return `<article class="chat-message ${role}">
+      <div class="chat-role">${escapeHtml(label)}</div>
+      <pre>${escapeHtml(text)}</pre>
+    </article>`;
+  }).join("");
+}
+
+function normalizeTranscriptMessage(message) {
+  if (!message || typeof message !== "object") return null;
+  const text = String(message.text || "").trim();
+  if (!text) return null;
+  const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
+  const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
+  return { role, label, text };
+}
+
+export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, transcript = null, autoRecoverConfig = null }) {
   const activeWindow = selectedWindow || String((windows.find((item) => item.active) || windows[0] || {}).index ?? "");
   const autoRecoverEnabled = !!autoRecoverConfig;
   const autoRecoverWindow = autoRecoverEnabled ? String(autoRecoverConfig.window ?? "") : "";
@@ -240,7 +263,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
         </span>
       </div>
-      <div id="chat-log" class="chat-log" tabindex="0">${renderChatMessages(output)}</div>
+      <div id="chat-log" class="chat-log" tabindex="0">${renderTranscriptMessages(transcript?.messages || [], output)}</div>
       <details class="raw-output">
         <summary>查看原始输出</summary>
         <pre id="raw-output-text">${escapeHtml(output || "")}</pre>
@@ -252,12 +275,13 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       <p id="send-status" class="muted"></p>
     </section>
     <script>
-      const node = ${JSON.stringify(node.name)};
-      const name = ${JSON.stringify(name)};
-      const activeWindow = ${JSON.stringify(activeWindow)};
+      const node = ${scriptJson(node.name)};
+      const name = ${scriptJson(name)};
+      const activeWindow = ${scriptJson(activeWindow)};
       let autoRecoverOnActiveWindow = ${JSON.stringify(autoRecoverOnActiveWindow)};
       let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
       const chatLog = document.querySelector("#chat-log");
+      const initialTranscriptMessages = ${scriptJson(transcript?.messages || [])};
       let autoscroll = true;
 
       chatLog.addEventListener("scroll", () => {
@@ -322,25 +346,47 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       }
 
       function renderChat(output) {
-        const blocks = splitChatBlocks(output);
+        return renderMessages([], output);
+      }
+
+      function normalizeTranscriptMessage(message) {
+        if (!message || typeof message !== "object") return null;
+        const text = String(message.text || "").trim();
+        if (!text) return null;
+        const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
+        const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
+        return {role, label, text};
+      }
+
+      function renderMessages(messages, output) {
+        const normalized = Array.isArray(messages) ? messages.map(normalizeTranscriptMessage).filter(Boolean) : [];
+        const blocks = normalized.length ? normalized : splitChatBlocks(output);
         if (!blocks.length) {
           return '<div class="empty chat-empty">暂无输出</div>';
         }
         return blocks.map((block) => {
-          return '<article class="chat-message ' + block.role + '"><div class="chat-role">Output</div><pre>' + escapeText(block.text) + '</pre></article>';
+          return '<article class="chat-message ' + block.role + '"><div class="chat-role">' + escapeText(block.label || "Output") + '</div><pre>' + escapeText(block.text) + '</pre></article>';
         }).join("");
       }
 
       async function refreshOutput() {
         try {
-        const query = new URLSearchParams({lines: "2000"});
-        if (activeWindow !== "") query.set("window", activeWindow);
-        const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
-        if (!response.ok) return;
-        const body = await response.json();
+        const outputQuery = new URLSearchParams({lines: "2000"});
+        const transcriptQuery = new URLSearchParams({lines: "500"});
+        if (activeWindow !== "") {
+          outputQuery.set("window", activeWindow);
+          transcriptQuery.set("window", activeWindow);
+        }
+        const [outputResponse, transcriptResponse] = await Promise.all([
+          fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + outputQuery.toString()),
+          fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/transcript-state?" + transcriptQuery.toString())
+        ]);
+        if (!outputResponse.ok) return;
+        const body = await outputResponse.json();
+        const transcriptBody = transcriptResponse.ok ? await transcriptResponse.json().catch(() => ({})) : {};
         if (body.inMode) return;
         const previousScrollTop = chatLog.scrollTop;
-        chatLog.innerHTML = renderChat(body.output || "");
+        chatLog.innerHTML = renderMessages(transcriptBody.messages || [], body.output || "");
         const rawOutput = document.querySelector("#raw-output-text");
         if (rawOutput) rawOutput.textContent = body.output || "";
         if (autoscroll) {
@@ -444,6 +490,9 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       });
       refreshOutput();
       setInterval(refreshOutput, 1000);
+      if (initialTranscriptMessages.length) {
+        chatLog.innerHTML = renderMessages(initialTranscriptMessages, "");
+      }
       chatLog.scrollTop = chatLog.scrollHeight;
     </script>
   `);
@@ -528,6 +577,15 @@ export function escapeHtml(value) {
 
 function escapeJs(value) {
   return String(value).replaceAll("\\", "\\\\").replaceAll("'", "\\'");
+}
+
+function scriptJson(value) {
+  return JSON.stringify(value)
+    .replaceAll("<", "\\u003c")
+    .replaceAll(">", "\\u003e")
+    .replaceAll("&", "\\u0026")
+    .replaceAll("\u2028", "\\u2028")
+    .replaceAll("\u2029", "\\u2029");
 }
 
 function styles() {
