@@ -39,7 +39,7 @@ export function renderSessionsPage(nodeViews) {
           <label>节点
             <select name="node">${nodeViews.map((node) => `<option value="${escapeHtml(node.name)}">${escapeHtml(node.name)}</option>`).join("")}</select>
           </label>
-          <label>名称 <input name="name" placeholder="codex-main" required pattern="[A-Za-z0-9_.:-]{1,80}"></label>
+          <label>名称 <input name="name" placeholder="codex-main" required pattern="[A-Za-z0-9_-]{1,80}" title="只能包含字母、数字、下划线或短横线"></label>
           <label>工作目录 <input name="cwd" value="${escapeHtml(process.cwd())}" required></label>
           <label>命令 <input name="command" value="bash" required></label>
           <button type="submit">创建</button>

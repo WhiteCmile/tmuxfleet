@@ -1,7 +1,18 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { inferAgentProcessFromRows, selectTranscriptPaneFromRows } from "../src/runtime.js";
+import { assertSessionName, inferAgentProcessFromRows, selectTranscriptPaneFromRows } from "../src/runtime.js";
+
+test("assertSessionName rejects tmux target separator characters", () => {
+  assert.throws(
+    () => assertSessionName("agent.dev"),
+    /letters, numbers, underscore, or dash/
+  );
+  assert.throws(
+    () => assertSessionName("agent:dev"),
+    /letters, numbers, underscore, or dash/
+  );
+});
 
 test("inferAgentProcessFromRows detects a direct agent command", () => {
   assert.deepEqual(inferAgentProcessFromRows("codex", 123, []), {

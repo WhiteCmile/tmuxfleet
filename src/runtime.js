@@ -7,11 +7,11 @@ import { transcriptState } from "./transcript.js";
 
 const execFileAsync = promisify(execFile);
 
-const SESSION_NAME_PATTERN = /^[A-Za-z0-9_.:-]{1,80}$/;
+const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 
 export function assertSessionName(name) {
   if (!SESSION_NAME_PATTERN.test(String(name || ""))) {
-    const error = new Error("Session name may only contain letters, numbers, dot, underscore, colon, or dash");
+    const error = new Error("Session name may only contain letters, numbers, underscore, or dash");
     error.statusCode = 400;
     throw error;
   }
