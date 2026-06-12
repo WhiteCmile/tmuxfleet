@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import os from "node:os";
 import path from "node:path";
+import { setTimeout as sleep } from "node:timers/promises";
 import { promisify } from "node:util";
 
 import { transcriptState } from "./transcript.js";
@@ -9,6 +10,7 @@ const execFileAsync = promisify(execFile);
 
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
 const TMUXFLEET_FIELD_SEPARATOR = "|tmuxfleet|";
+const SEND_MESSAGE_SUBMIT_DELAY_MS = 100;
 
 export function assertSessionName(name) {
   if (!SESSION_NAME_PATTERN.test(String(name || ""))) {
@@ -331,6 +333,8 @@ export async function sendMessage(name, text, windowIndex = "") {
     await processRows()
   );
   await execFileAsync("tmux", ["send-keys", "-t", target, "-l", message]);
+  // Let terminal TUIs ingest the literal text before the submit key arrives.
+  await sleep(SEND_MESSAGE_SUBMIT_DELAY_MS);
   await execFileAsync("tmux", ["send-keys", "-t", target, "C-m"]);
 }
 
