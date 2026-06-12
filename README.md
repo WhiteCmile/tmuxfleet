@@ -6,16 +6,15 @@ tmuxfleet is a small Hub + Node dashboard for managing tmux sessions across
 machines.
 
 tmux stays the source of truth. tmuxfleet lists sessions, creates sessions,
-captures output, sends input, resizes tmux windows to match the browser, and
-proxies requests between the browser, the Hub, and Nodes.
+captures output into a chat-style log view, sends input, and proxies requests
+between the browser, the Hub, and Nodes.
 
 ## Features
 
 - List local and remote tmux sessions.
 - Create sessions with a working directory and command.
-- Open a session in the browser and send line-based input.
+- Open a session in a browser-friendly chat/log view and send line-based input.
 - Switch between multiple tmux windows in one session.
-- Resize tmux windows to match the browser terminal area.
 - Optionally auto-recover selected agent sessions after API or network errors.
 - Stop tmux sessions from the dashboard.
 

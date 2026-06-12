@@ -50,6 +50,19 @@ node src/cli.js hub --host 0.0.0.0 --port 8090
 
 Hub 绑定到非 loopback 地址时必须设置 `TMUXFLEET_HUB_TOKEN`。
 
+## 自动更新 Wrapper
+
+长期运行 Hub 或 Node 时，可以用自动更新 wrapper。它会启动目标命令，定期检查当前
+Git upstream；如果工作区干净且可以 fast-forward，就自动 pull 并重启进程：
+
+```bash
+scripts/run-with-autoupdate.sh -- node src/cli.js hub --host 0.0.0.0 --port 8090
+```
+
+wrapper 只有在工作区干净、分支可以 fast-forward 时才更新。如果存在本地修改或分支
+已经 diverged，会跳过自动更新。可以设置 `TMUXFLEET_UPDATE_INTERVAL`，或传入
+`--interval seconds` 调整默认 60 秒检查间隔。
+
 ## 主动连接的 Node
 
 主动连接 Node 是远程机器位于 NAT 或防火墙后面时的推荐模式。Hub 只监听一个
@@ -73,6 +86,12 @@ cd /agent-dev/tmuxfleet
 
 export TMUXFLEET_NODE_TOKEN="<shared node token>"
 node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
+```
+
+使用自动更新：
+
+```bash
+scripts/run-with-autoupdate.sh -- node src/cli.js node --connect http://<hub-host-or-ip>:8090 --name devbox
 ```
 
 每台机器使用不同的 `--name`。Node 会自动出现在 Hub 的 Nodes 页面。

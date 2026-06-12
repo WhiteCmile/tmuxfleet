@@ -162,66 +162,52 @@ export function renderNodesPage(nodeViews) {
   `);
 }
 
-function palette256(n) {
-  if (n < 16) { const c = ["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n] || "#e4e7ec"; }
-  if (n < 232) { n -= 16; var r = Math.floor(n/36), g = Math.floor((n%36)/6), b = n%6; return "#"+[r?String(55+r*40).padStart(2,"0"):"00", g?String(55+g*40).padStart(2,"0"):"00", b?String(55+b*40).padStart(2,"0"):"00"].join(""); }
-  var v = 8 + (n-232)*10; var h = v.toString(16).padStart(2,"0"); return "#"+h+h+h;
+function stripTerminalCodes(value) {
+  return String(value || "")
+    .replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "")
+    .replace(/\x1b\][^\x07]*\x07/g, "")
+    .replace(/\r/g, "");
 }
 
-function ansiToHtml(text) {
-  text = String(text).replace(/\x1b\[[0-9;?]*[A-Za-ln-z]/g, "").replace(/\x1b\][^\x07]*\x07/g, "");
-  const sgr = {
-    0: [], 1: ["b"], 2: ["dim"], 3: ["i"], 4: ["u"],
-    30: ["c0"], 31: ["c1"], 32: ["c2"], 33: ["c3"],
-    34: ["c4"], 35: ["c5"], 36: ["c6"], 37: ["c7"],
-    40: ["bg0"], 41: ["bg1"], 42: ["bg2"], 43: ["bg3"],
-    44: ["bg4"], 45: ["bg5"], 46: ["bg6"], 47: ["bg7"],
-    90: ["c8"], 91: ["c9"], 92: ["c10"], 93: ["c11"],
-    94: ["c12"], 95: ["c13"], 96: ["c14"], 97: ["c15"],
-    100: ["bg8"], 101: ["bg9"], 102: ["bg10"], 103: ["bg11"],
-    104: ["bg12"], 105: ["bg13"], 106: ["bg14"], 107: ["bg15"]
-  };
-  const parts = text.split(/\x1b\[([0-9;]*)m/);
-  const spans = [];
-  const classes = [];
-  var styles = {}, styleStr = "";
-  function buildStyle() {
-    var p = [];
-    if (styles.fg) p.push("color:"+styles.fg);
-    if (styles.bg) p.push("background:"+styles.bg);
-    styleStr = p.length ? p.join(";") : "";
-  }
-  for (let i = 0; i < parts.length; i++) {
-    if (i % 2 === 0) {
-      if (parts[i]) {
-        var spanAttrs = "";
-        if (classes.length) spanAttrs += ' class="' + classes.join(" ") + '"';
-        if (styleStr) spanAttrs += ' style="' + styleStr + '"';
-        spans.push(spanAttrs
-          ? '<span' + spanAttrs + '>' + escapeHtml(parts[i]) + '</span>'
-          : escapeHtml(parts[i]));
-      }
-    } else {
-      const codes = parts[i] ? parts[i].split(";").map(Number) : [0];
-      for (var j = 0; j < codes.length; j++) {
-        var c = codes[j];
-        if (c === 0) { classes.length = 0; styles = {}; styleStr = ""; continue; }
-        if (c === 39) { delete styles.fg; for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci][0] === "c") classes.splice(ci, 1); } buildStyle(); continue; }
-        if (c === 49) { delete styles.bg; for (var ci = classes.length-1; ci >= 0; ci--) { if (classes[ci].startsWith("bg")) classes.splice(ci, 1); } buildStyle(); continue; }
-        if (c === 38 && codes[j+1] === 5 && codes[j+2] != null) { styles.fg = palette256(codes[j+2]); j += 2; buildStyle(); continue; }
-        if (c === 48 && codes[j+1] === 5 && codes[j+2] != null) { styles.bg = palette256(codes[j+2]); j += 2; buildStyle(); continue; }
-        const add = sgr[c];
-        if (add) {
-          for (var k = 0; k < add.length; k++) {
-            var idx = classes.indexOf(add[k]);
-            if (idx >= 0) classes.splice(idx, 1);
-            classes.push(add[k]);
-          }
-        }
-      }
+function splitChatBlocks(output) {
+  const text = stripTerminalCodes(output).trimEnd();
+  if (!text.trim()) return [];
+  const lines = text.split("\n");
+  const blocks = [];
+  let current = [];
+  for (const line of lines) {
+    const trimmed = line.trim();
+    const startsPrompt = /^(>|\$|#|❯|➜)\s+/.test(trimmed) || /^\[?(user|assistant|system|tool|error)\]?[:：]/i.test(trimmed);
+    if ((startsPrompt || trimmed === "") && current.some((item) => item.trim())) {
+      blocks.push(current.join("\n").trimEnd());
+      current = [];
+      if (trimmed === "") continue;
     }
+    current.push(line);
   }
-  return spans.join("");
+  if (current.some((item) => item.trim())) blocks.push(current.join("\n").trimEnd());
+  return blocks.slice(-80);
+}
+
+function chatRole(block) {
+  const first = block.trimStart().split("\n")[0] || "";
+  if (/^(>|\$|#|❯|➜)\s+/.test(first) || /^\[?user\]?[:：]/i.test(first)) return "user";
+  if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
+  if (/^\[?(system|tool)\]?[:：]/i.test(first)) return "system";
+  return "agent";
+}
+
+function renderChatMessages(output) {
+  const blocks = splitChatBlocks(output);
+  if (!blocks.length) return `<div class="empty chat-empty">暂无输出</div>`;
+  return blocks.map((block) => {
+    const role = chatRole(block);
+    const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
+    return `<article class="chat-message ${role}">
+      <div class="chat-role">${label}</div>
+      <pre>${escapeHtml(block)}</pre>
+    </article>`;
+  }).join("");
 }
 
 export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, autoRecoverConfig = null }) {
@@ -240,7 +226,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       <div>
         <p><a href="/sessions">返回会话列表</a></p>
         <h1>${escapeHtml(node.name)}/${escapeHtml(name)}</h1>
-        <p>${escapeHtml(node.url)} · HTTP 轮询终端</p>
+        <p>${escapeHtml(node.url)} · Chat log view</p>
       </div>
       <button id="stop-session" class="danger">停止</button>
     </section>
@@ -255,8 +241,8 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
         </span>
       </div>
-      <pre id="terminal" tabindex="0">${ansiToHtml(output)}</pre>
-      <form id="send-message" class="terminal-input">
+      <div id="chat-log" class="chat-log" tabindex="0">${renderChatMessages(output)}</div>
+      <form id="send-message" class="chat-input">
         <input name="text" autocomplete="off" autofocus placeholder="输入一行内容后按回车">
         <button type="submit">发送</button>
       </form>
@@ -268,131 +254,103 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       const activeWindow = ${JSON.stringify(activeWindow)};
       let autoRecoverOnActiveWindow = ${JSON.stringify(autoRecoverOnActiveWindow)};
       let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
-      const terminal = document.querySelector("#terminal");
+      const chatLog = document.querySelector("#chat-log");
       let autoscroll = true;
-      let lastTerminalSize = "";
-      let resizeTimer = null;
 
-      terminal.addEventListener("scroll", () => {
-        autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
+      chatLog.addEventListener("scroll", () => {
+        autoscroll = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 20;
       });
-      terminal.addEventListener("wheel", (event) => {
-        if (terminal.scrollHeight <= terminal.clientHeight) return;
-        event.preventDefault();
-        terminal.scrollTop += event.deltaY;
-        autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
-      }, { passive: false });
-      terminal.addEventListener("keydown", (event) => {
+      chatLog.addEventListener("keydown", (event) => {
         const keyScroll = {
-          PageUp: -terminal.clientHeight * 0.9,
-          PageDown: terminal.clientHeight * 0.9,
+          PageUp: -chatLog.clientHeight * 0.9,
+          PageDown: chatLog.clientHeight * 0.9,
           ArrowUp: -24,
           ArrowDown: 24,
         }[event.key];
         if (keyScroll !== undefined) {
           event.preventDefault();
-          terminal.scrollTop += keyScroll;
+          chatLog.scrollTop += keyScroll;
         } else if (event.key === "Home") {
           event.preventDefault();
-          terminal.scrollTop = 0;
+          chatLog.scrollTop = 0;
         } else if (event.key === "End") {
           event.preventDefault();
-          terminal.scrollTop = terminal.scrollHeight;
+          chatLog.scrollTop = chatLog.scrollHeight;
         } else {
           return;
         }
-        autoscroll = terminal.scrollTop + terminal.clientHeight >= terminal.scrollHeight - 20;
+        autoscroll = chatLog.scrollTop + chatLog.clientHeight >= chatLog.scrollHeight - 20;
       });
 
-      function measureTerminalSize() {
-        const style = getComputedStyle(terminal);
-        const probe = document.createElement("span");
-        probe.textContent = "MMMMMMMMMM";
-        probe.style.position = "absolute";
-        probe.style.visibility = "hidden";
-        probe.style.whiteSpace = "pre";
-        probe.style.font = style.font;
-        terminal.appendChild(probe);
-        const rect = probe.getBoundingClientRect();
-        probe.remove();
-        const charWidth = rect.width / 10 || 8;
-        const lineHeight = parseFloat(style.lineHeight) || rect.height || 18;
-        const contentWidth = terminal.clientWidth - parseFloat(style.paddingLeft || 0) - parseFloat(style.paddingRight || 0);
-        const contentHeight = terminal.clientHeight - parseFloat(style.paddingTop || 0) - parseFloat(style.paddingBottom || 0);
-        return {
-          cols: Math.max(40, Math.min(300, Math.floor(contentWidth / charWidth))),
-          rows: Math.max(10, Math.min(120, Math.floor(contentHeight / lineHeight))),
-        };
+      function stripTerminalCodes(value) {
+        const ESC = String.fromCharCode(27);
+        const BEL = String.fromCharCode(7);
+        return String(value || "")
+          .replace(new RegExp(ESC + "\\\\[[0-9;?]*[A-Za-z]", "g"), "")
+          .replace(new RegExp(ESC + "\\\\][^" + BEL + "]*" + BEL, "g"), "")
+          .replace(/\\r/g, "");
       }
 
-      async function syncTerminalSize() {
-        try {
-          const size = measureTerminalSize();
-          const key = size.cols + "x" + size.rows;
-          if (key === lastTerminalSize) return;
-          const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/resize", {
-            method: "POST",
-            headers: {"content-type": "application/json"},
-            body: JSON.stringify({window: activeWindow, cols: size.cols, rows: size.rows})
-          });
-          if (response.ok) lastTerminalSize = key;
-        } catch (_) {}
+      function escapeText(value) {
+        return String(value).replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
       }
 
-      function scheduleTerminalResize() {
-        clearTimeout(resizeTimer);
-        resizeTimer = setTimeout(syncTerminalSize, 120);
+      function splitChatBlocks(output) {
+        const text = stripTerminalCodes(output).trimEnd();
+        if (!text.trim()) return [];
+        const lines = text.split("\\n");
+        const blocks = [];
+        let current = [];
+        for (const line of lines) {
+          const trimmed = line.trim();
+          const startsPrompt = /^(>|\\$|#|❯|➜)\\s+/.test(trimmed) || /^\\[?(user|assistant|system|tool|error)\\]?[:：]/i.test(trimmed);
+          if ((startsPrompt || trimmed === "") && current.some((item) => item.trim())) {
+            blocks.push(current.join("\\n").trimEnd());
+            current = [];
+            if (trimmed === "") continue;
+          }
+          current.push(line);
+        }
+        if (current.some((item) => item.trim())) blocks.push(current.join("\\n").trimEnd());
+        return blocks.slice(-80);
+      }
+
+      function blockRole(block) {
+        const first = block.trimStart().split("\\n")[0] || "";
+        if (/^(>|\\$|#|❯|➜)\\s+/.test(first) || /^\\[?user\\]?[:：]/i.test(first)) return "user";
+        if (/error|failed|exception|traceback|timed out|connection/i.test(first)) return "error";
+        if (/^\\[?(system|tool)\\]?[:：]/i.test(first)) return "system";
+        return "agent";
+      }
+
+      function renderChat(output) {
+        const blocks = splitChatBlocks(output);
+        if (!blocks.length) {
+          return '<div class="empty chat-empty">暂无输出</div>';
+        }
+        return blocks.map((block) => {
+          const role = blockRole(block);
+          const label = role === "user" ? "Input" : role === "error" ? "Error" : role === "system" ? "System" : "Output";
+          return '<article class="chat-message ' + role + '"><div class="chat-role">' + label + '</div><pre>' + escapeText(block) + '</pre></article>';
+        }).join("");
       }
 
       async function refreshOutput() {
         try {
-        await syncTerminalSize();
-        const query = new URLSearchParams({lines: "500"});
+        const query = new URLSearchParams({lines: "2000"});
         if (activeWindow !== "") query.set("window", activeWindow);
         const response = await fetch("/api/sessions/" + encodeURIComponent(node) + "/" + encodeURIComponent(name) + "/output?" + query.toString());
         if (!response.ok) return;
         const body = await response.json();
         if (body.inMode) return;
-        function p256(n) {
-          if (n < 16) { var c=["#1c1c1c","#cc342d","#198844","#c4a000","#3971ed","#a36ac7","#3971ed","#c5c8c6","#545454","#f96a5d","#40d472","#f0c600","#6ea8fe","#d2a8ff","#79c0ff","#fff"]; return c[n]||"#e4e7ec"; }
-          if (n < 232) { n-=16; var r=Math.floor(n/36),g=Math.floor((n%36)/6),b=n%6; return "#"+[r?String(55+r*40).padStart(2,"0"):"00",g?String(55+g*40).padStart(2,"0"):"00",b?String(55+b*40).padStart(2,"0"):"00"].join(""); }
-          var v=8+(n-232)*10,h=v.toString(16).padStart(2,"0"); return "#"+h+h+h;
-        }
-        var ESC=String.fromCharCode(27),BEL=String.fromCharCode(7);
-        var SGR={0:[],1:["b"],2:["dim"],3:["i"],4:["u"],30:["c0"],31:["c1"],32:["c2"],33:["c3"],34:["c4"],35:["c5"],36:["c6"],37:["c7"],40:["bg0"],41:["bg1"],42:["bg2"],43:["bg3"],44:["bg4"],45:["bg5"],46:["bg6"],47:["bg7"],90:["c8"],91:["c9"],92:["c10"],93:["c11"],94:["c12"],95:["c13"],96:["c14"],97:["c15"],100:["bg8"],101:["bg9"],102:["bg10"],103:["bg11"],104:["bg12"],105:["bg13"],106:["bg14"],107:["bg15"]};
-        var t=(body.output||"").replace(new RegExp(ESC+"\\\\[[0-9;?]*[A-Za-ln-z]","g"),"").replace(new RegExp(ESC+"\\\\][^"+BEL+"]*"+BEL,"g"),"");
-        var parts=t.split(new RegExp(ESC+"\\\\[([0-9;]*)m")),out=[],cs=[],ss={},sst="";
-        for (var i=0;i<parts.length;i++) {
-          if (i%2===0) {
-            if (parts[i]) {
-              var esc=parts[i].replaceAll("&","&amp;").replaceAll("<","&lt;").replaceAll(">","&gt;");
-              var attrs="";
-              if (cs.length) attrs+=' class="'+cs.join(" ")+'"';
-              if (sst) attrs+=' style="'+sst+'"';
-              out.push(attrs ? '<span'+attrs+'>'+esc+'</span>' : esc);
-            }
-          } else {
-            var codes=parts[i]?parts[i].split(";").map(Number):[0];
-            for (var j=0;j<codes.length;j++) {
-              var cd=codes[j];
-              if (cd===0){cs.length=0;ss={};sst="";continue}
-              if (cd===39){delete ss.fg;cs=cs.filter(function(x){return x[0]!=="c"});sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
-              if (cd===49){delete ss.bg;cs=cs.filter(function(x){return x[0]!=="b"||x[1]!=="g"});sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
-              if (cd===38&&codes[j+1]===5&&codes[j+2]!=null){ss.fg=p256(codes[j+2]);j+=2;sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
-              if (cd===48&&codes[j+1]===5&&codes[j+2]!=null){ss.bg=p256(codes[j+2]);j+=2;sst=(ss.fg?"color:"+ss.fg+";":"")+(ss.bg?"background:"+ss.bg:"");continue}
-              var add=SGR[cd];
-              if(add){for(var k=0;k<add.length;k++){var idx=cs.indexOf(add[k]);if(idx>=0)cs.splice(idx,1);cs.push(add[k])}}
-            }
-          }
-        }
-        const previousScrollTop = terminal.scrollTop;
-        terminal.innerHTML = out.join("");
+        const previousScrollTop = chatLog.scrollTop;
+        chatLog.innerHTML = renderChat(body.output || "");
         if (autoscroll) {
-          terminal.scrollTop = terminal.scrollHeight;
+          chatLog.scrollTop = chatLog.scrollHeight;
         } else {
-          terminal.scrollTop = previousScrollTop;
+          chatLog.scrollTop = previousScrollTop;
         }
-        } catch(e) { terminal.textContent = "[refresh error] " + (e.message || String(e)); }
+        } catch(e) { chatLog.innerHTML = '<div class="error">[refresh error] ' + escapeText(e.message || String(e)) + '</div>'; }
       }
 
       document.querySelector("#send-message").addEventListener("submit", async (event) => {
@@ -486,13 +444,9 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           button.disabled = false;
         }
       });
-      if (window.ResizeObserver) {
-        new ResizeObserver(scheduleTerminalResize).observe(terminal);
-      }
-      window.addEventListener("resize", scheduleTerminalResize);
-      syncTerminalSize().then(refreshOutput);
+      refreshOutput();
       setInterval(refreshOutput, 1000);
-      terminal.scrollTop = terminal.scrollHeight;
+      chatLog.scrollTop = chatLog.scrollHeight;
     </script>
   `);
 }
@@ -626,17 +580,15 @@ function styles() {
     .window-tab.is-active { border-color: var(--blue); box-shadow: inset 0 0 0 1px var(--blue); }
     .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: #fbfcfe; color: var(--muted); }
     .terminal-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; overscroll-behavior: contain; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
-    #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
-    #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
-    #terminal .c4 { color: #3971ed; } #terminal .c5 { color: #a36ac7; } #terminal .c6 { color: #3971ed; } #terminal .c7 { color: #c5c8c6; }
-    #terminal .c8 { color: #545454; } #terminal .c9 { color: #f96a5d; } #terminal .c10 { color: #40d472; } #terminal .c11 { color: #f0c600; }
-    #terminal .c12 { color: #6ea8fe; } #terminal .c13 { color: #d2a8ff; } #terminal .c14 { color: #79c0ff; } #terminal .c15 { color: #fff; }
-    #terminal .bg0 { background: #1c1c1c; } #terminal .bg1 { background: #cc342d; } #terminal .bg2 { background: #198844; } #terminal .bg3 { background: #c4a000; }
-    #terminal .bg4 { background: #3971ed; } #terminal .bg5 { background: #a36ac7; } #terminal .bg6 { background: #3971ed; } #terminal .bg7 { background: #c5c8c6; }
-    #terminal .bg8 { background: #545454; } #terminal .bg9 { background: #f96a5d; } #terminal .bg10 { background: #40d472; } #terminal .bg11 { background: #f0c600; }
-    #terminal .bg12 { background: #6ea8fe; } #terminal .bg13 { background: #d2a8ff; } #terminal .bg14 { background: #79c0ff; } #terminal .bg15 { background: #fff; }
-    .terminal-input { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #fff; }
+    .chat-log { height: calc(100vh - 238px); min-height: 560px; overflow: auto; overscroll-behavior: contain; display: grid; align-content: start; gap: 12px; padding: 16px; background: #f3f5f8; }
+    .chat-message { max-width: 980px; border: 1px solid #d7dee8; border-radius: 8px; padding: 10px 12px; background: #fff; }
+    .chat-message.user { justify-self: end; background: #e8f1ff; border-color: #b8d4ff; }
+    .chat-message.error { border-color: #f2b8b5; background: #fff0f0; }
+    .chat-message.system { background: #f7f7f8; }
+    .chat-role { color: #667085; font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0; }
+    .chat-message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; color: #182230; font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
+    .chat-empty { padding: 20px; }
+    .chat-input { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: #fff; }
 
     @media (max-width: 760px) {
       main, main.session-main { padding: 14px; }
@@ -650,7 +602,7 @@ function styles() {
       .panel.narrow { max-width: none; margin: 20px auto; }
       .path { max-width: 200px; }
       .node-list { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-      #terminal { height: calc(100vh - 200px); min-height: 420px; }
+      .chat-log { height: calc(100vh - 200px); min-height: 420px; }
     }
 
     @media (max-width: 480px) {
@@ -675,8 +627,9 @@ function styles() {
       .terminal-tools { align-items: stretch; display: grid; gap: 6px; }
       .terminal-actions { display: grid; justify-content: stretch; }
       .terminal-tools button { width: 100%; }
-      #terminal { height: calc(100vh - 180px); min-height: 360px; padding: 12px; font-size: 12px; }
-      .terminal-input { gap: 8px; padding: 10px; }
+      .chat-log { height: calc(100vh - 180px); min-height: 360px; padding: 12px; }
+      .chat-message pre { font-size: 12px; }
+      .chat-input { gap: 8px; padding: 10px; }
       table { min-width: 360px; }
       th, td { padding: 8px 6px; }
       th { font-size: 11px; }
