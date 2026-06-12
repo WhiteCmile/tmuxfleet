@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { assertSessionName, inferAgentProcessFromRows, selectTranscriptPaneFromRows } from "../src/runtime.js";
+import {
+  assertSessionName,
+  inferAgentProcessFromRows,
+  parseSessionListOutput,
+  selectTranscriptPaneFromRows
+} from "../src/runtime.js";
 
 test("assertSessionName rejects tmux target separator characters", () => {
   assert.throws(
@@ -12,6 +17,32 @@ test("assertSessionName rejects tmux target separator characters", () => {
     () => assertSessionName("agent:dev"),
     /letters, numbers, underscore, or dash/
   );
+});
+
+test("parseSessionListOutput parses tmux sessions with a stable sentinel separator", () => {
+  assert.deepEqual(parseSessionListOutput([
+    "test|tmuxfleet|1|tmuxfleet|0|tmuxfleet|1781248687|tmuxfleet|1781248687",
+    "paper-agent-dev|tmuxfleet|2|tmuxfleet|1|tmuxfleet|1781249000|tmuxfleet|1781248000"
+  ].join("\n")), [
+    {
+      name: "test",
+      windows: "1",
+      attached: "0",
+      activity: "1781248687",
+      created: "1781248687"
+    },
+    {
+      name: "paper-agent-dev",
+      windows: "2",
+      attached: "1",
+      activity: "1781249000",
+      created: "1781248000"
+    }
+  ]);
+});
+
+test("parseSessionListOutput ignores rows where tmux did not emit field separators", () => {
+  assert.deepEqual(parseSessionListOutput("test1_1_0_1781248687_1781248687\n"), []);
 });
 
 test("inferAgentProcessFromRows detects a direct agent command", () => {

@@ -8,6 +8,7 @@ import { transcriptState } from "./transcript.js";
 const execFileAsync = promisify(execFile);
 
 const SESSION_NAME_PATTERN = /^[A-Za-z0-9_-]{1,80}$/;
+const TMUXFLEET_FIELD_SEPARATOR = "|tmuxfleet|";
 
 export function assertSessionName(name) {
   if (!SESSION_NAME_PATTERN.test(String(name || ""))) {
@@ -33,7 +34,7 @@ export async function listSessions() {
     "#{session_attached}",
     "#{session_activity}",
     "#{session_created}"
-  ].join("\t");
+  ].join(TMUXFLEET_FIELD_SEPARATOR);
 
   let stdout = "";
   try {
@@ -43,9 +44,7 @@ export async function listSessions() {
   }
 
   const rows = [];
-  for (const line of stdout.trim().split("\n")) {
-    if (!line) continue;
-    const [name, windows, attached, activity, created] = line.split("\t");
+  for (const { name, windows, attached, activity, created } of parseSessionListOutput(stdout)) {
     const pane = await activePane(name);
     rows.push({
       name,
@@ -59,6 +58,17 @@ export async function listSessions() {
       status: Number(attached || 0) > 0 ? "attached" : "detached",
       lastUpdated: Number(activity || 0) ? new Date(Number(activity) * 1000).toISOString() : null
     });
+  }
+  return rows;
+}
+
+export function parseSessionListOutput(stdout) {
+  const rows = [];
+  for (const line of String(stdout || "").trim().split("\n")) {
+    if (!line) continue;
+    const [name, windows, attached, activity, created] = line.split(TMUXFLEET_FIELD_SEPARATOR);
+    if (!name || created === undefined) continue;
+    rows.push({ name, windows, attached, activity, created });
   }
   return rows;
 }
