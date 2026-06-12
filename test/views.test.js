@@ -64,6 +64,27 @@ test("chatMessagesFromOutput treats captured terminal text as output instead of 
   ]);
 });
 
+test("chatMessagesFromOutput hides standalone divider lines", () => {
+  const output = [
+    "First useful line",
+    "--------",
+    "────────────────────────",
+    "====",
+    "Second useful line"
+  ].join("\n");
+
+  assert.deepEqual(chatMessagesFromOutput(output), [
+    {
+      role: "agent",
+      label: "Output",
+      text: [
+        "First useful line",
+        "Second useful line"
+      ].join("\n")
+    }
+  ]);
+});
+
 test("renderSessionPage keeps raw output available outside the filtered chat log", () => {
   const html = renderSessionPage({
     node: { name: "local", url: "http://127.0.0.1:8091" },

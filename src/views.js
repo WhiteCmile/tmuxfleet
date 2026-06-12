@@ -182,7 +182,7 @@ function splitChatBlocks(output) {
 function isHiddenOutputLine(line) {
   if (!line) return false;
   return [
-    /^(---|\.\.\.)$/,
+    /^(?=.{3,}$)[\s\-_=.*·•─━╌╍┄┅]+$/,
     /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\s*[:=]/i,
     /^system:\s*you are (codex|chatgpt|an ai|a coding agent)/i,
     /^you are (codex|chatgpt|an ai|a coding agent)/i,
@@ -311,7 +311,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       function isHiddenOutputLine(line) {
         if (!line) return false;
         return [
-          /^(---|\\.\\.\\.)$/,
+          /^(?=.{3,}$)[\\s\\-_=.*·•─━╌╍┄┅]+$/,
           /^(model|working directory|workdir|cwd|approval policy|sandbox|network access|shell|timezone)\\s*[:=]/i,
           /^system:\\s*you are (codex|chatgpt|an ai|a coding agent)/i,
           /^you are (codex|chatgpt|an ai|a coding agent)/i,
