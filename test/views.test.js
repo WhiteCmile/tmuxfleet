@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   chatMessagesFromOutput,
+  renderSessionsPage,
   renderSessionPage
 } from "../src/views.js";
 
@@ -83,6 +84,15 @@ test("chatMessagesFromOutput hides standalone divider lines", () => {
       ].join("\n")
     }
   ]);
+});
+
+test("renderSessionsPage redirects to the session name returned by the create API", () => {
+  const html = renderSessionsPage([
+    { name: "local", status: "connected", sessions: [] }
+  ]);
+
+  assert.match(html, /const createdName = body\.session && body\.session\.name \? body\.session\.name : data\.name;/);
+  assert.match(html, /encodeURIComponent\(createdName\)/);
 });
 
 test("renderSessionPage keeps raw output available outside the filtered chat log", () => {

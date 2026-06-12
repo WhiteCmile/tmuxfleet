@@ -87,7 +87,8 @@ export function renderSessionsPage(nodeViews) {
           status.textContent = body.detail || "创建失败";
           return;
         }
-        location.href = "/sessions/" + encodeURIComponent(data.node) + "/" + encodeURIComponent(data.name);
+        const createdName = body.session && body.session.name ? body.session.name : data.name;
+        location.href = "/sessions/" + encodeURIComponent(data.node) + "/" + encodeURIComponent(createdName);
       });
       for (const button of document.querySelectorAll(".toggle-vis")) {
         button.addEventListener("click", async () => {
