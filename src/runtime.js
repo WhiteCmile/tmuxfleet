@@ -164,11 +164,71 @@ export async function captureOutput(name, lines = 160, windowIndex = "") {
 export async function sessionTranscriptState(name, lines = 500, windowIndex = "") {
   const output = await captureOutput(name, lines, windowIndex);
   const pane = await activePaneTarget(tmuxTarget(name, windowIndex));
+  const agent = await inferAgentProcess(pane.currentCommand || "", pane.panePid || 0);
   return transcriptState({
     output,
-    cli: pane.currentCommand || "",
-    panePid: pane.panePid || 0
+    cli: agent.cli || pane.currentCommand || "",
+    panePid: agent.pid || pane.panePid || 0
   });
+}
+
+export async function inferAgentProcess(currentCommand, panePid) {
+  return inferAgentProcessFromRows(currentCommand, panePid, await processRows());
+}
+
+export function inferAgentProcessFromRows(currentCommand, panePid, rows) {
+  const direct = normalizeAgentCli(currentCommand);
+  const children = new Map();
+  for (const row of rows || []) {
+    const ppid = Number(row.ppid || 0);
+    if (!children.has(ppid)) children.set(ppid, []);
+    children.get(ppid).push({
+      pid: Number(row.pid || 0),
+      command: String(row.command || "")
+    });
+  }
+  const descendant = findDescendantAgent(children, Number(panePid || 0), direct || "");
+  if (descendant.cli) return descendant;
+  if (direct) return { cli: direct, pid: Number(panePid || 0) };
+  return { cli: "", pid: 0 };
+}
+
+function findDescendantAgent(children, panePid, preferredCli = "") {
+  const frontier = [{ pid: Number(panePid || 0), depth: 0 }];
+  while (frontier.length) {
+    const item = frontier.shift();
+    if (!item || item.depth >= 3) continue;
+    for (const child of children.get(item.pid) || []) {
+      const cli = normalizeAgentCli(child.command);
+      if (cli && (!preferredCli || preferredCli === cli)) return { cli, pid: child.pid };
+      frontier.push({ pid: child.pid, depth: item.depth + 1 });
+    }
+  }
+  return { cli: "", pid: 0 };
+}
+
+function normalizeAgentCli(command) {
+  const base = path.basename(String(command || "")).toLowerCase();
+  if (base === "codex" || base === "codex-cli") return "codex";
+  if (base === "claude" || base === "claude-code") return "claude";
+  return "";
+}
+
+async function processRows() {
+  try {
+    const { stdout } = await execFileAsync("ps", ["-eo", "pid=,ppid=,comm="]);
+    return stdout.split("\n").map((line) => {
+      const parts = line.trim().split(/\s+/, 3);
+      if (parts.length < 3) return null;
+      return {
+        pid: Number(parts[0] || 0),
+        ppid: Number(parts[1] || 0),
+        command: parts[2] || ""
+      };
+    }).filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 export async function paneInMode(name, windowIndex = "") {
