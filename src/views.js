@@ -36,33 +36,36 @@ function favicon() {
 }
 
 export function renderSessionsPage(nodeViews) {
-  const sessionTableHead = `<thead><tr><th>标识</th><th>状态</th><th class="opt-col">目录</th><th>活动</th><th>更新时间</th><th>自动恢复</th><th></th><th></th></tr></thead>`;
+  const sessionTableHead = `<thead><tr><th>标识</th><th>状态</th><th>活动</th><th class="opt-col">目录</th><th>更新时间</th><th>自动恢复</th><th></th></tr></thead>`;
   return page("会话", `
     <section class="hero">
       <div>
         <h1>会话</h1>
         <p id="summary">正在加载...</p>
       </div>
-      <span class="live-indicator"><span id="live-dot" class="live-dot"></span><span id="live-text" class="muted">自动刷新中</span></span>
+      <div class="hero-actions">
+        <span class="live-indicator"><span id="live-dot" class="live-dot"></span><span id="live-text" class="muted">自动刷新中</span></span>
+        <button id="toggle-create" type="button">新建会话</button>
+      </div>
     </section>
-    <section class="grid two">
-      <div class="panel">
-        <h2>创建会话</h2>
-        <form id="create-session" class="stack">
+    <div class="node-strip">
+      <div class="node-chips" id="node-chips"></div>
+      <a href="/nodes">管理节点 →</a>
+    </div>
+    <section class="panel" id="create-panel" hidden>
+      <h2>新建会话</h2>
+      <form id="create-session">
+        <div class="form-row">
           <label>节点
             <select name="node">${nodeViews.map((node) => `<option value="${escapeHtml(node.name)}">${escapeHtml(node.name)}</option>`).join("")}</select>
           </label>
           <label>名称 <input name="name" placeholder="codex-main" required pattern="[A-Za-z0-9_.:-]{1,80}"></label>
-          <label>工作目录 <input name="cwd" value="${escapeHtml(process.cwd())}" required></label>
+          <label class="grow">工作目录 <input name="cwd" value="${escapeHtml(process.cwd())}" required></label>
           <label>命令 <input name="command" value="bash" required></label>
           <button type="submit">创建</button>
-          <p id="create-status" class="muted"></p>
-        </form>
-      </div>
-      <div class="panel">
-        <h2>节点状态</h2>
-        <div class="node-list" id="node-list"></div>
-      </div>
+        </div>
+        <p id="create-status" class="muted form-status"></p>
+      </form>
     </section>
     <section class="panel">
       <h2>当前会话</h2>
@@ -91,21 +94,23 @@ ${clientCommon()}
         return "<tr>"
           + '<td><a class="mono" href="' + esc(href) + '">' + esc(nodeName + "/" + session.name) + "</a></td>"
           + "<td>" + pillHtml(session.status) + "</td>"
-          + '<td class="path mono opt-col" title="' + esc(session.cwd || "") + '">' + esc(session.cwd || "-") + "</td>"
           + '<td data-activity-cmd="' + esc(session.command || "") + '" data-activity-at="' + esc(session.activityAt || "") + '">' + activityPillHtml(session.command, session.activityAt) + "</td>"
+          + '<td class="path mono opt-col" title="' + esc(session.cwd || "") + '">' + esc(session.cwd || "-") + "</td>"
           + '<td data-ts="' + esc(session.lastUpdated || "") + '">' + esc(relTime(session.lastUpdated)) + "</td>"
           + "<td>" + (session.autoRecover ? '<span class="pill ok">已开启</span>' : '<span class="muted">-</span>') + "</td>"
-          + '<td><a class="btn-sm button-link" href="' + esc(href) + '">打开</a></td>'
-          + '<td><button class="btn-sm ghost toggle-vis" type="button" data-node="' + esc(nodeName) + '" data-session="' + esc(session.name) + '" data-hidden="' + (session.hidden ? "1" : "0") + '" title="' + (session.hidden ? "恢复显示此会话" : "隐藏此会话") + '">' + (session.hidden ? "显示" : "隐藏") + "</button></td>"
+          + '<td><span class="actions">'
+            + '<a class="btn-sm button-link" href="' + esc(href) + '">打开</a>'
+            + '<button class="btn-sm ghost toggle-vis" type="button" data-node="' + esc(nodeName) + '" data-session="' + esc(session.name) + '" data-hidden="' + (session.hidden ? "1" : "0") + '" title="' + (session.hidden ? "恢复显示此会话" : "隐藏此会话") + '">' + (session.hidden ? "显示" : "隐藏") + "</button>"
+          + "</span></td>"
           + "</tr>";
       }
 
-      function badgeHtml(node) {
-        return '<div class="node-badge">'
+      function chipHtml(node) {
+        const title = esc((node.url || "") + " · " + (STATUS_TEXT[node.status] || node.status || ""));
+        return '<span class="chip ' + (node.status === "connected" ? "ok" : "bad") + '" title="' + title + '">'
           + "<strong>" + esc(node.name) + "</strong>"
-          + pillHtml(node.status)
-          + "<small>" + (node.sessions || []).length + " 个会话</small>"
-          + "</div>";
+          + "<span>" + (node.sessions || []).length + "</span>"
+          + "</span>";
       }
 
       function renderAll() {
@@ -117,8 +122,8 @@ ${clientCommon()}
           }
         }
         document.querySelector("#summary").textContent = "已配置 " + nodes.length + " 个节点，" + rows.length + " 个可见会话" + (hiddenRows.length ? "，" + hiddenRows.length + " 个已隐藏" : "") + "。";
-        document.querySelector("#node-list").innerHTML = nodes.length ? nodes.map(badgeHtml).join("") : '<p class="muted">尚未配置节点。</p>';
-        document.querySelector("#session-rows").innerHTML = rows.length ? rows.join("") : '<tr class="empty-row"><td colspan="8" class="empty">没有可见会话，可在上方创建。</td></tr>';
+        document.querySelector("#node-chips").innerHTML = nodes.length ? nodes.map(chipHtml).join("") : '<span class="muted">尚未配置节点</span>';
+        document.querySelector("#session-rows").innerHTML = rows.length ? rows.join("") : '<tr class="empty-row"><td colspan="7" class="empty">没有可见会话，点击右上角「新建会话」开始。</td></tr>';
         document.querySelector("#hidden-panel").hidden = hiddenRows.length === 0;
         document.querySelector("#hidden-count").textContent = hiddenRows.length;
         document.querySelector("#hidden-rows").innerHTML = hiddenRows.join("");
@@ -133,6 +138,16 @@ ${clientCommon()}
 
       renderAll();
       const pollNow = startPolling((next) => { nodes = next; scheduleRender(); });
+
+      const createPanel = document.querySelector("#create-panel");
+      const toggleCreateButton = document.querySelector("#toggle-create");
+      function setCreateOpen(open) {
+        createPanel.hidden = !open;
+        toggleCreateButton.textContent = open ? "收起" : "新建会话";
+        if (open) createPanel.querySelector("input[name=name]").focus();
+      }
+      toggleCreateButton.addEventListener("click", () => setCreateOpen(createPanel.hidden));
+      if (!initial.some((node) => (node.sessions || []).some((session) => !session.hidden))) setCreateOpen(true);
 
       document.querySelector("#create-session").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -193,26 +208,29 @@ export function renderNodesPage(nodeViews) {
         <h1>节点</h1>
         <p>添加 Hub 可以访问到的机器，可以走 LAN、Tailscale、WireGuard 或 SSH 隧道。</p>
       </div>
-      <span class="live-indicator"><span id="live-dot" class="live-dot"></span><span id="live-text" class="muted">自动刷新中</span></span>
+      <div class="hero-actions">
+        <span class="live-indicator"><span id="live-dot" class="live-dot"></span><span id="live-text" class="muted">自动刷新中</span></span>
+        <button id="toggle-add" type="button">添加节点</button>
+      </div>
     </section>
-    <section class="grid two">
-      <div class="panel">
-        <h2>添加节点</h2>
-        <form id="add-node" class="stack">
+    <section class="panel" id="add-panel" hidden>
+      <h2>添加节点</h2>
+      <form id="add-node">
+        <div class="form-row">
           <label>名称 <input name="name" placeholder="devbox" required pattern="[A-Za-z0-9_.:-]{1,80}"></label>
-          <label>地址 <input name="url" placeholder="http://100.x.x.x:8091" required></label>
+          <label class="grow">地址 <input name="url" placeholder="http://100.x.x.x:8091" required></label>
           <label>模式 <input name="mode" value="remote"></label>
           <button type="submit">添加节点</button>
-          <p id="node-status" class="muted"></p>
-        </form>
-      </div>
-      <div class="panel">
-        <h2>已配置节点</h2>
-        <div class="table-wrap"><table>
-          <thead><tr><th>名称</th><th>状态</th><th class="opt-col">地址</th><th>会话数</th><th></th></tr></thead>
-          <tbody id="node-rows"></tbody>
-        </table></div>
-      </div>
+        </div>
+        <p id="node-status" class="muted form-status"></p>
+      </form>
+    </section>
+    <section class="panel">
+      <h2>已配置节点</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>名称</th><th>状态</th><th class="opt-col">地址</th><th>会话数</th><th></th></tr></thead>
+        <tbody id="node-rows"></tbody>
+      </table></div>
     </section>
     <script>
       const initial = ${jsonInline(nodeViews)};
@@ -234,7 +252,7 @@ ${clientCommon()}
       function renderAll() {
         document.querySelector("#node-rows").innerHTML = nodes.length
           ? nodes.map(nodeRowHtml).join("")
-          : '<tr class="empty-row"><td colspan="5" class="empty">尚未添加节点。</td></tr>';
+          : '<tr class="empty-row"><td colspan="5" class="empty">尚未添加节点，点击右上角「添加节点」。</td></tr>';
         lastRenderKey = JSON.stringify(nodes);
       }
 
@@ -246,6 +264,15 @@ ${clientCommon()}
 
       renderAll();
       const pollNow = startPolling((next) => { nodes = next; scheduleRender(); });
+
+      const addPanel = document.querySelector("#add-panel");
+      const toggleAddButton = document.querySelector("#toggle-add");
+      function setAddOpen(open) {
+        addPanel.hidden = !open;
+        toggleAddButton.textContent = open ? "收起" : "添加节点";
+        if (open) addPanel.querySelector("input[name=name]").focus();
+      }
+      toggleAddButton.addEventListener("click", () => setAddOpen(addPanel.hidden));
 
       document.querySelector("#add-node").addEventListener("submit", async (event) => {
         event.preventDefault();
@@ -366,12 +393,10 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
     ? `规则恢复：window ${autoRecoverWindow || "默认"} · ${autoRecoverConfig.message || "go on"} · 智能恢复${smartRecoverEnabled ? "已开启" : "未开启"}`
     : "未开启";
   return page(`${node.name}/${name}`, `
-    <section class="hero compact">
-      <div>
-        <p><a href="/sessions">返回会话列表</a></p>
-        <h1>${escapeHtml(node.name)}/${escapeHtml(name)}</h1>
-        <p>${escapeHtml(node.url)} · HTTP 轮询终端</p>
-      </div>
+    <section class="session-bar">
+      <a class="back" href="/sessions">← 会话列表</a>
+      <h1>${escapeHtml(node.name)}/${escapeHtml(name)}</h1>
+      <span class="meta">${escapeHtml(node.url)} · HTTP 轮询终端</span>
       <button id="stop-session" class="danger">停止</button>
     </section>
     <section class="panel terminal-panel">
@@ -814,9 +839,9 @@ function styles() {
     h1 { font-size: 26px; letter-spacing: -0.01em; }
     h2 { font-size: 16px; margin-bottom: 14px; }
     p { margin: 8px 0 0; color: var(--muted); }
-    .hero { display: flex; justify-content: space-between; align-items: end; gap: 16px; margin-bottom: 20px; }
-    .hero.compact { align-items: center; }
-    .live-indicator { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; padding-bottom: 4px; }
+    .hero { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 18px; }
+    .hero-actions { display: flex; align-items: center; gap: 14px; }
+    .live-indicator { display: inline-flex; align-items: center; gap: 7px; font-size: 13px; }
     .live-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); flex: none; }
     @media (prefers-reduced-motion: no-preference) {
       .live-dot { animation: live-pulse 2.4s ease-in-out infinite; }
@@ -824,8 +849,28 @@ function styles() {
       @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     }
     .live-dot.bad { background: var(--bad); animation: none; }
-    .grid.two { display: grid; grid-template-columns: minmax(280px, 0.8fr) 1.2fr; gap: 18px; margin-bottom: 18px; }
+    .node-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+    .node-strip > a { font-size: 13px; white-space: nowrap; }
+    .node-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .chip { display: inline-flex; align-items: center; gap: 7px; border: 1px solid var(--line); background: var(--panel); border-radius: 999px; padding: 5px 12px; font-size: 13px; box-shadow: var(--shadow); }
+    .chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: var(--muted); flex: none; }
+    .chip.ok::before { background: var(--ok); }
+    .chip.bad::before { background: var(--bad); }
+    .chip span { color: var(--muted); font-size: 12px; }
+    .form-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; }
+    .form-row label { flex: 1 1 150px; min-width: 150px; }
+    .form-row label.grow { flex-grow: 1.8; }
+    .form-row button { flex: 0 0 auto; }
+    .form-status { margin: 8px 0 0; }
+    .form-status:empty { display: none; }
+    .session-bar { display: flex; align-items: center; gap: 14px; min-width: 0; margin-bottom: 14px; }
+    .session-bar .back { color: var(--muted); white-space: nowrap; font-size: 13px; }
+    .session-bar .back:hover { color: var(--text); }
+    .session-bar h1 { font: 600 16px/1.3 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .session-bar .meta { flex: 1; min-width: 0; color: var(--muted); font-size: 13px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .actions { display: inline-flex; align-items: center; gap: 8px; }
     .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px; box-shadow: var(--shadow); }
+    main > .panel { margin-bottom: 18px; }
     .panel.narrow { max-width: 400px; margin: 80px auto; }
     .login-brand { text-align: center; margin-bottom: 18px; }
     .login-brand h1 { font-size: 22px; }
@@ -864,12 +909,9 @@ function styles() {
     .pill.ok { background: var(--ok-bg); color: var(--ok); }
     .pill.bad { background: var(--bad-bg); color: var(--bad); }
     .pill.info { background: var(--info-bg); color: var(--info); }
-    .node-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 10px; }
-    .node-badge { border: 1px solid var(--line); border-radius: 10px; padding: 12px; display: grid; gap: 6px; justify-items: start; }
-    .node-badge small { color: var(--muted); }
     .hidden-sessions summary { cursor: pointer; }
     .hidden-sessions summary h2 { display: inline; margin: 0; }
-    .terminal-panel { padding: 0; overflow: hidden; }
+    .terminal-panel { padding: 0; overflow: hidden; margin-bottom: 0; }
     .window-tabs { display: flex; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; padding: 10px 12px; border-bottom: 1px solid var(--line); background: var(--panel); }
     .window-tab { min-width: 120px; border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px; color: var(--text); display: grid; gap: 2px; text-decoration: none; }
     .window-tab:hover { background: var(--row-hover); }
@@ -879,7 +921,7 @@ function styles() {
     .terminal-tools { min-height: 48px; display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 8px 12px; border-bottom: 1px solid var(--line); background: var(--panel-2); color: var(--muted); font-size: 13px; }
     .terminal-status { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
     .terminal-actions { display: inline-flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
-    #terminal { margin: 0; height: calc(100vh - 238px); min-height: 560px; overflow: auto; overscroll-behavior: contain; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
+    #terminal { margin: 0; height: calc(100vh - 395px); min-height: 420px; overflow: auto; overscroll-behavior: contain; padding: 16px; background: #101828; color: #e4e7ec; font: 13px/1.45 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; white-space: pre-wrap; }
     #terminal .b { font-weight: bold; } #terminal .dim { opacity: 0.6; } #terminal .i { font-style: italic; } #terminal .u { text-decoration: underline; }
     #terminal .c0 { color: #1c1c1c; } #terminal .c1 { color: #cc342d; } #terminal .c2 { color: #198844; } #terminal .c3 { color: #c4a000; }
     #terminal .c4 { color: #3971ed; } #terminal .c5 { color: #a36ac7; } #terminal .c6 { color: #3971ed; } #terminal .c7 { color: #c5c8c6; }
@@ -890,21 +932,20 @@ function styles() {
     #terminal .bg8 { background: #545454; } #terminal .bg9 { background: #f96a5d; } #terminal .bg10 { background: #40d472; } #terminal .bg11 { background: #f0c600; }
     #terminal .bg12 { background: #6ea8fe; } #terminal .bg13 { background: #d2a8ff; } #terminal .bg14 { background: #79c0ff; } #terminal .bg15 { background: #fff; }
     .terminal-input { display: grid; grid-template-columns: 1fr auto; gap: 10px; padding: 12px; border-top: 1px solid var(--line); background: var(--panel); }
+    #send-status { margin: 0; padding: 6px 12px 10px; font-size: 12px; min-height: 30px; background: var(--panel); }
 
     @media (max-width: 760px) {
       main, main.session-main { padding: 14px; }
-      .grid.two { grid-template-columns: 1fr; gap: 14px; }
       header { height: auto; min-height: 50px; gap: 12px; padding: 10px 14px; flex-wrap: wrap; }
       nav { gap: 6px; }
       h1 { font-size: 22px; }
       .hero { display: grid; gap: 12px; }
-      .hero.compact button.danger { width: 100%; }
+      .session-bar { flex-wrap: wrap; }
       button, .button-link, .btn-sm { min-height: 44px; }
       .panel { padding: 14px; }
       .panel.narrow { max-width: none; margin: 20px auto; }
       .path { max-width: 200px; }
-      .node-list { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
-      #terminal { height: calc(100vh - 200px); min-height: 420px; }
+      #terminal { height: calc(100vh - 400px); min-height: 380px; }
     }
 
     @media (max-width: 480px) {
@@ -922,14 +963,15 @@ function styles() {
       label { gap: 4px; }
       .opt-col { display: none; }
       .path { max-width: 140px; }
-      .node-list { grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
-      .node-badge { padding: 10px; }
+      .form-row label { min-width: 100%; }
+      .form-row button { width: 100%; }
+      .session-bar .meta { display: none; }
       .window-tabs { gap: 6px; padding: 8px 10px; }
       .window-tab { min-width: 90px; padding: 8px 10px; font-size: 13px; }
       .terminal-tools { align-items: stretch; display: grid; gap: 6px; }
       .terminal-actions { display: grid; justify-content: stretch; }
       .terminal-tools button { width: 100%; }
-      #terminal { height: calc(100vh - 180px); min-height: 360px; padding: 12px; font-size: 12px; }
+      #terminal { height: calc(100vh - 500px); min-height: 300px; padding: 12px; font-size: 12px; }
       .terminal-input { gap: 8px; padding: 10px; }
       table { min-width: 360px; }
       th, td { padding: 8px 6px; }
