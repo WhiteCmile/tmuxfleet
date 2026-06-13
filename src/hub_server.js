@@ -15,7 +15,7 @@ import {
   killSession,
   listSessions,
   listWindows,
-  paneInMode,
+  paneStatus,
   sendMessage,
   sessionTranscriptState
 } from "./runtime.js";
@@ -333,17 +333,26 @@ async function sessionOutputPayload(node, name, lines, windowIndex = "") {
   if (node.mode === "local") {
     return {
       output: await captureOutput(name, lines, windowIndex),
-      inMode: await paneInMode(name, windowIndex)
+      ...(await paneStatus(name, windowIndex))
     };
   }
   const query = new URLSearchParams({ lines: String(lines) });
   if (windowIndex !== "") query.set("window", String(windowIndex));
   if (node.mode === "connected") {
     const payload = await requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-    return { output: payload.output || "", inMode: !!payload.inMode };
+    return normalizeOutputPayload(payload);
   }
   const payload = await requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/output?${query.toString()}`);
-  return { output: payload.output || "", inMode: !!payload.inMode };
+  return normalizeOutputPayload(payload);
+}
+
+function normalizeOutputPayload(payload) {
+  return {
+    output: payload.output || "",
+    inMode: !!payload.inMode,
+    command: payload.command || "",
+    activityAt: payload.activityAt || null
+  };
 }
 
 async function sessionTranscript(node, name, lines, windowIndex = "") {
@@ -763,11 +772,14 @@ async function readForm(req) {
 function loginForm(next, error) {
   return `
     <section class="panel narrow">
-      <h1>tmuxfleet</h1>
+      <div class="login-brand">
+        <h1>tmuxfleet</h1>
+        <p class="muted">输入 Hub Token 登录</p>
+      </div>
       <form method="post" action="/login" class="stack">
         <input type="hidden" name="next" value="${escapeHtml(next)}">
         <label>Hub Token <input name="token" type="password" autofocus></label>
-        ${error ? `<p class="error">${escapeHtml(error)}</p>` : ""}
+        ${error ? `<p class="form-error">${escapeHtml(error)}</p>` : ""}
         <button type="submit">登录</button>
       </form>
     </section>

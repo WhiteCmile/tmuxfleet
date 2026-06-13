@@ -12,6 +12,12 @@ between the browser, the Hub, and Nodes.
 ## Features
 
 - List local and remote tmux sessions.
+- Live dashboard: session and node status, counts, and timestamps refresh in
+  place without page reloads.
+- Per-session activity indicator: shows the foreground command (for example a
+  running agent), marks idle shells, and flags sessions with no new output for
+  60 seconds in red as possibly stuck.
+- Web UI follows the system light/dark color scheme.
 - Create sessions with a working directory and command.
 - Open a session in a browser-friendly chat/log view and send line-based input.
 - Switch between multiple tmux windows in one session.
