@@ -16,8 +16,8 @@ import {
   listSessions,
   listWindows,
   paneStatus,
-  resizeWindow,
-  sendMessage
+  sendMessage,
+  sessionTranscriptState
 } from "./runtime.js";
 import {
   bearerToken,
@@ -102,7 +102,8 @@ export function startHubServer({ host, port }) {
     const node = findHubNode(params.node);
     const selectedWindow = url.searchParams.get("window") || "";
     const windows = await sessionWindows(node, params.name);
-    const output = await sessionOutput(node, params.name, 500, selectedWindow);
+    const output = await sessionOutput(node, params.name, 2000, selectedWindow);
+    const transcript = await sessionTranscript(node, params.name, 500, selectedWindow);
     const autoRecoverConfig = loadAutoRecoverSessions()[`${node.name}/${params.name}`] || null;
     const views = await loadViews();
     sendHtml(res, 200, views.renderSessionPage({
@@ -111,6 +112,7 @@ export function startHubServer({ host, port }) {
       windows,
       selectedWindow,
       output,
+      transcript,
       autoRecoverConfig
     }));
   }));
@@ -163,18 +165,21 @@ export function startHubServer({ host, port }) {
     sendJson(res, 200, output);
   }));
 
+  app.add("GET", "/api/sessions/:node/:name/transcript-state", requireHubAuth(async ({ res, params, url }) => {
+    const node = findHubNode(params.node);
+    sendJson(res, 200, await sessionTranscript(
+      node,
+      params.name,
+      url.searchParams.get("lines") || 500,
+      url.searchParams.get("window") || ""
+    ));
+  }));
+
   app.add("POST", "/api/sessions/:node/:name/send", requireHubAuth(async ({ res, params, body }) => {
     const node = findHubNode(params.node);
     const payload = await body();
     await sendNodeMessage(node, params.name, payload.text, payload.window || "");
     sendJson(res, 200, { status: "sent" });
-  }));
-
-  app.add("POST", "/api/sessions/:node/:name/resize", requireHubAuth(async ({ res, params, body }) => {
-    const node = findHubNode(params.node);
-    const payload = await body();
-    await resizeNodeWindow(node, params.name, payload.cols, payload.rows, payload.window || "");
-    sendJson(res, 200, { status: "resized" });
   }));
 
   app.add("PUT", "/api/sessions/:node/:name/hide", requireHubAuth(async ({ res, params, body }) => {
@@ -261,7 +266,29 @@ export async function collectNodeViews() {
 
 async function withNodeName(node, sessionsOrPromise) {
   const sessions = await sessionsOrPromise;
-  return sessions.map((session) => ({ ...session, node: node.name }));
+  return sessions.map((session) => ({ ...normalizeListedSession(session), node: node.name }));
+}
+
+export function normalizeListedSession(session) {
+  const normalized = { ...(session || {}) };
+  const name = String(normalized.name || "");
+  const metadataAlreadyParsed = Number(normalized.windows || 0) > 0 && Number(normalized.created || 0) > 0;
+  if (metadataAlreadyParsed) return normalized;
+
+  const match = /^(.*)_([1-9]\d*)_([01])_(\d{9,})_(\d{9,})$/u.exec(name);
+  if (!match) return normalized;
+
+  const [, cleanName, windows, attached, activity, created] = match;
+  if (!cleanName) return normalized;
+  return {
+    ...normalized,
+    name: cleanName,
+    windows: Number(windows),
+    attached: Number(attached),
+    activity: Number(activity),
+    created: Number(created),
+    lastUpdated: new Date(Number(activity) * 1000).toISOString()
+  };
 }
 
 async function createNodeSession(node, payload) {
@@ -328,6 +355,18 @@ function normalizeOutputPayload(payload) {
   };
 }
 
+async function sessionTranscript(node, name, lines, windowIndex = "") {
+  if (node.mode === "local") {
+    return sessionTranscriptState(name, lines, windowIndex);
+  }
+  const query = new URLSearchParams({ lines: String(lines) });
+  if (windowIndex !== "") query.set("window", String(windowIndex));
+  if (node.mode === "connected") {
+    return requestConnectedNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+  }
+  return requestNodeJson(node, "GET", `/api/sessions/${encodeURIComponent(name)}/transcript-state?${query.toString()}`);
+}
+
 async function sendNodeMessage(node, name, text, windowIndex = "") {
   if (node.mode === "local") {
     await sendMessage(name, text, windowIndex);
@@ -344,19 +383,6 @@ async function sendNodeMessage(node, name, text, windowIndex = "") {
     text,
     window: windowIndex
   });
-}
-
-async function resizeNodeWindow(node, name, cols, rows, windowIndex = "") {
-  if (node.mode === "local") {
-    await resizeWindow(name, cols, rows, windowIndex);
-    return;
-  }
-  const body = { cols, rows, window: windowIndex };
-  if (node.mode === "connected") {
-    await requestConnectedNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
-    return;
-  }
-  await requestNodeJson(node, "POST", `/api/sessions/${encodeURIComponent(name)}/resize`, body);
 }
 
 function startAutoRecoverLoop() {

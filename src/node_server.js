@@ -10,8 +10,8 @@ import {
   listSessions,
   listWindows,
   paneStatus,
-  resizeWindow,
   sendMessage,
+  sessionTranscriptState,
   tmuxAvailable
 } from "./runtime.js";
 
@@ -54,16 +54,19 @@ export function startNodeServer({ host, port }) {
     sendJson(res, 200, { output, ...(await paneStatus(params.name, windowIndex)) });
   }));
 
+  app.add("GET", "/api/sessions/:name/transcript-state", withNodeAuth(async ({ res, params, url }) => {
+    const windowIndex = url.searchParams.get("window") || "";
+    sendJson(res, 200, await sessionTranscriptState(
+      params.name,
+      url.searchParams.get("lines") || 500,
+      windowIndex
+    ));
+  }));
+
   app.add("POST", "/api/sessions/:name/send", withNodeAuth(async ({ res, params, body }) => {
     const payload = await body();
     await sendMessage(params.name, payload.text, payload.window || "");
     sendJson(res, 200, { status: "sent" });
-  }));
-
-  app.add("POST", "/api/sessions/:name/resize", withNodeAuth(async ({ res, params, body }) => {
-    const payload = await body();
-    await resizeWindow(params.name, payload.cols, payload.rows, payload.window || "");
-    sendJson(res, 200, { status: "resized" });
   }));
 
   const server = listen(app, host, port);
@@ -139,13 +142,21 @@ async function runNodeCommand(command) {
       );
       return { ok: true, status: 200, payload: { output, ...(await paneStatus(sessionName, windowIndex)) } };
     }
+    if (method === "GET" && parts[3] === "transcript-state") {
+      const windowIndex = url.searchParams.get("window") || "";
+      return {
+        ok: true,
+        status: 200,
+        payload: await sessionTranscriptState(
+          sessionName,
+          url.searchParams.get("lines") || 500,
+          windowIndex
+        )
+      };
+    }
     if (method === "POST" && parts[3] === "send") {
       await sendMessage(sessionName, body.text, body.window || "");
       return { ok: true, status: 200, payload: { status: "sent" } };
-    }
-    if (method === "POST" && parts[3] === "resize") {
-      await resizeWindow(sessionName, body.cols, body.rows, body.window || "");
-      return { ok: true, status: 200, payload: { status: "resized" } };
     }
   }
 
