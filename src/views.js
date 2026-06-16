@@ -48,10 +48,6 @@ export function renderSessionsPage(nodeViews) {
         <button id="toggle-create" type="button">新建会话</button>
       </div>
     </section>
-    <div class="node-strip">
-      <div class="node-chips" id="node-chips"></div>
-      <a href="/nodes">管理节点 →</a>
-    </div>
     <section class="panel" id="create-panel" hidden>
       <h2>新建会话</h2>
       <form id="create-session">
@@ -67,13 +63,7 @@ export function renderSessionsPage(nodeViews) {
         <p id="create-status" class="muted form-status"></p>
       </form>
     </section>
-    <section class="panel">
-      <h2>当前会话</h2>
-      <div class="table-wrap"><table>
-        ${sessionTableHead}
-        <tbody id="session-rows"></tbody>
-      </table></div>
-    </section>
+    <div id="node-sections"></div>
     <section class="panel" id="hidden-panel" hidden>
       <details class="hidden-sessions">
         <summary><h2>已隐藏 (<span id="hidden-count">0</span>)</h2></summary>
@@ -88,11 +78,12 @@ export function renderSessionsPage(nodeViews) {
 ${clientCommon()}
       let nodes = initial;
       let lastRenderKey = "";
+      const TABLE_HEAD = '<thead><tr><th>标识</th><th>状态</th><th>活动</th><th class="opt-col">目录</th><th>更新时间</th><th>自动恢复</th><th></th></tr></thead>';
 
       function rowHtml(nodeName, session) {
         const href = "/sessions/" + encodeURIComponent(nodeName) + "/" + encodeURIComponent(session.name);
         return "<tr>"
-          + '<td><a class="mono" href="' + esc(href) + '">' + esc(nodeName + "/" + session.name) + "</a></td>"
+          + '<td><a class="mono" href="' + esc(href) + '">' + esc(session.name) + "</a></td>"
           + "<td>" + pillHtml(session.status) + "</td>"
           + '<td data-activity-cmd="' + esc(session.command || "") + '" data-activity-at="' + esc(session.activityAt || "") + '">' + activityPillHtml(session.command, session.activityAt) + "</td>"
           + '<td class="path mono opt-col" title="' + esc(session.cwd || "") + '">' + esc(session.cwd || "-") + "</td>"
@@ -105,25 +96,46 @@ ${clientCommon()}
           + "</tr>";
       }
 
-      function chipHtml(node) {
-        const title = esc((node.url || "") + " · " + (STATUS_TEXT[node.status] || node.status || ""));
-        return '<span class="chip ' + (node.status === "connected" ? "ok" : "bad") + '" title="' + title + '">'
-          + "<strong>" + esc(node.name) + "</strong>"
-          + "<span>" + (node.sessions || []).length + "</span>"
-          + "</span>";
-      }
-
       function renderAll() {
-        const rows = [];
+        const container = document.querySelector("#node-sections");
         const hiddenRows = [];
+        let totalVisible = 0;
+        const openState = {};
+        container.querySelectorAll("details.node-section").forEach(function(el) {
+          openState[el.dataset.node] = el.open;
+        });
+
+        const sections = [];
         for (const node of nodes) {
-          for (const session of node.sessions || []) {
-            (session.hidden ? hiddenRows : rows).push(rowHtml(node.name, session));
-          }
+          const visible = (node.sessions || []).filter(function(s) { return !s.hidden; });
+          const hidden = (node.sessions || []).filter(function(s) { return s.hidden; });
+          totalVisible += visible.length;
+          for (const s of hidden) { hiddenRows.push(rowHtml(node.name, s)); }
+
+          var wasOpen = openState[node.name];
+          var isOpen = wasOpen !== undefined ? wasOpen : visible.length > 0;
+          var statusClass = node.status === "connected" ? "ok" : "bad";
+          var statusText = STATUS_TEXT[node.status] || node.status || "";
+
+          sections.push(
+            '<details class="node-section panel" data-node="' + esc(node.name) + '"' + (isOpen ? " open" : "") + ">"
+            + '<summary class="node-header">'
+              + '<span class="node-header-info">'
+                + '<span class="pill ' + statusClass + '">' + esc(node.name) + "</span>"
+                + '<span class="muted">' + esc(node.url || "") + " · " + esc(statusText) + "</span>"
+              + "</span>"
+              + '<span class="muted">' + visible.length + " 个会话</span>"
+            + "</summary>"
+            + '<div class="table-wrap"><table>' + TABLE_HEAD
+            + "<tbody>"
+              + (visible.length ? visible.map(function(s) { return rowHtml(node.name, s); }).join("") : '<tr class="empty-row"><td colspan="7" class="empty">该节点没有可见会话</td></tr>')
+            + "</tbody></table></div>"
+            + "</details>"
+          );
         }
-        document.querySelector("#summary").textContent = "已配置 " + nodes.length + " 个节点，" + rows.length + " 个可见会话" + (hiddenRows.length ? "，" + hiddenRows.length + " 个已隐藏" : "") + "。";
-        document.querySelector("#node-chips").innerHTML = nodes.length ? nodes.map(chipHtml).join("") : '<span class="muted">尚未配置节点</span>';
-        document.querySelector("#session-rows").innerHTML = rows.length ? rows.join("") : '<tr class="empty-row"><td colspan="7" class="empty">没有可见会话，点击右上角「新建会话」开始。</td></tr>';
+        container.innerHTML = sections.length ? sections.join("") : '<p class="empty" style="text-align:center;padding:28px">没有配置节点。<a href="/nodes">添加节点</a></p>';
+
+        document.querySelector("#summary").textContent = "已配置 " + nodes.length + " 个节点，" + totalVisible + " 个可见会话" + (hiddenRows.length ? "，" + hiddenRows.length + " 个已隐藏" : "") + "。";
         document.querySelector("#hidden-panel").hidden = hiddenRows.length === 0;
         document.querySelector("#hidden-count").textContent = hiddenRows.length;
         document.querySelector("#hidden-rows").innerHTML = hiddenRows.join("");
@@ -367,10 +379,21 @@ export function renderChatMessages(output) {
   }).join("");
 }
 
-export function renderTranscriptMessages(messages = [], fallbackOutput = "") {
+export function renderTranscriptMessages(messages = [], fallbackOutput = "", autoRecoverEvents = []) {
   const normalized = Array.isArray(messages)
     ? messages.map((message) => normalizeTranscriptMessage(message)).filter(Boolean)
     : [];
+  for (const event of autoRecoverEvents) {
+    normalized.push({
+      role: "system",
+      label: event.type === "smart-recover" ? "Smart Recover" : "Auto Recover",
+      text: `sent "${event.message || "go on"}"` + (event.reason ? ` (${event.reason})` : ""),
+      time: event.time || 0
+    });
+  }
+  if (normalized.length && normalized.some((m) => m.time)) {
+    normalized.sort((a, b) => (a.time || 0) - (b.time || 0));
+  }
   const blocks = normalized.length ? normalized : chatMessagesFromOutput(fallbackOutput);
   if (!blocks.length) return `<div class="empty chat-empty">暂无输出</div>`;
   return blocks.map(({ role, label, text }) => {
@@ -387,10 +410,10 @@ function normalizeTranscriptMessage(message) {
   if (!text) return null;
   const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
   const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
-  return { role, label, text };
+  return { role, label, text, time: message.time || 0 };
 }
 
-export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, transcript = null, autoRecoverConfig = null }) {
+export function renderSessionPage({ node, name, windows = [], selectedWindow = "", output, transcript = null, autoRecoverConfig = null, autoRecoverEvents = [] }) {
   const activeWindow = selectedWindow || String((windows.find((item) => item.active) || windows[0] || {}).index ?? "");
   const autoRecoverEnabled = !!autoRecoverConfig;
   const autoRecoverWindow = autoRecoverEnabled ? String(autoRecoverConfig.window ?? "") : "";
@@ -419,7 +442,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
           <button id="toggle-smartrecover" class="ghost" type="button">${escapeHtml(smartRecoverLabel)}</button>
         </span>
       </div>
-      <div id="chat-log" class="chat-log" tabindex="0">${renderTranscriptMessages(transcript?.messages || [], output)}</div>
+      <div id="chat-log" class="chat-log" tabindex="0">${renderTranscriptMessages(transcript?.messages || [], output, autoRecoverEvents)}</div>
       <details class="raw-output">
         <summary>查看原始输出</summary>
         <pre id="raw-output-text">${escapeHtml(output || "")}</pre>
@@ -438,6 +461,7 @@ export function renderSessionPage({ node, name, windows = [], selectedWindow = "
       let smartRecoverEnabled = ${JSON.stringify(smartRecoverEnabled)};
       const chatLog = document.querySelector("#chat-log");
       const initialTranscriptMessages = ${scriptJson(transcript?.messages || [])};
+      const initialAutoRecoverEvents = ${scriptJson(autoRecoverEvents || [])};
       const sendForm = document.querySelector("#send-message");
       const sendInput = sendForm.elements.text;
       const sendButton = sendForm.querySelector("button[type='submit']");
@@ -544,20 +568,34 @@ ${clientActivityCore()}
 
       function normalizeTranscriptMessage(message) {
         if (!message || typeof message !== "object") return null;
-        const text = String(message.text || "").trim();
+        var text = String(message.text || "").trim();
         if (!text) return null;
-        const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
-        const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
-        return {role, label, text};
+        var role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
+        var label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
+        return {role: role, label: label, text: text, time: message.time || 0};
       }
 
-      function renderMessages(messages, output) {
-        const normalized = Array.isArray(messages) ? messages.map(normalizeTranscriptMessage).filter(Boolean) : [];
-        const blocks = normalized.length ? normalized : splitChatBlocks(output);
+      function renderMessages(messages, output, arEvents) {
+        var normalized = Array.isArray(messages) ? messages.map(normalizeTranscriptMessage).filter(Boolean) : [];
+        if (Array.isArray(arEvents)) {
+          for (var i = 0; i < arEvents.length; i++) {
+            var ev = arEvents[i];
+            normalized.push({
+              role: "system",
+              label: ev.type === "smart-recover" ? "Smart Recover" : "Auto Recover",
+              text: 'sent "' + (ev.message || "go on") + '"' + (ev.reason ? " (" + ev.reason + ")" : ""),
+              time: ev.time || 0
+            });
+          }
+          if (normalized.length && normalized.some(function(m) { return m.time; })) {
+            normalized.sort(function(a, b) { return (a.time || 0) - (b.time || 0); });
+          }
+        }
+        var blocks = normalized.length ? normalized : splitChatBlocks(output);
         if (!blocks.length) {
           return '<div class="empty chat-empty">暂无输出</div>';
         }
-        return blocks.map((block) => {
+        return blocks.map(function(block) {
           return '<article class="chat-message ' + block.role + '"><div class="chat-role">' + escapeText(block.label || "Output") + '</div><pre>' + escapeText(block.text) + '</pre></article>';
         }).join("");
       }
@@ -582,7 +620,7 @@ ${clientActivityCore()}
         agentWorking = !!transcriptBody.working;
         updateSendControls();
         const previousScrollTop = chatLog.scrollTop;
-        chatLog.innerHTML = renderMessages(transcriptBody.messages || [], body.output || "");
+        chatLog.innerHTML = renderMessages(transcriptBody.messages || [], body.output || "", transcriptBody.autoRecoverEvents || []);
         const rawOutput = document.querySelector("#raw-output-text");
         if (rawOutput) rawOutput.textContent = body.output || "";
         if (autoscroll) {
@@ -687,8 +725,8 @@ ${clientActivityCore()}
       });
       refreshOutput();
       setInterval(refreshOutput, 1000);
-      if (initialTranscriptMessages.length) {
-        chatLog.innerHTML = renderMessages(initialTranscriptMessages, "");
+      if (initialTranscriptMessages.length || initialAutoRecoverEvents.length) {
+        chatLog.innerHTML = renderMessages(initialTranscriptMessages, "", initialAutoRecoverEvents);
       }
       updateSendControls();
       chatLog.scrollTop = chatLog.scrollHeight;
@@ -880,6 +918,15 @@ function styles() {
       @keyframes live-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
     }
     .live-dot.bad { background: var(--bad); animation: none; }
+    .node-section { margin-bottom: 16px; }
+    .node-section summary { list-style: none; }
+    .node-section summary::-webkit-details-marker { display: none; }
+    .node-header { display: flex; align-items: center; gap: 12px; cursor: pointer; user-select: none; padding: 4px 0; }
+    .node-header::before { content: "▸"; font-size: 12px; color: var(--muted); transition: transform 0.15s; flex-shrink: 0; }
+    details.node-section[open] > .node-header::before { transform: rotate(90deg); }
+    .node-header-info { display: flex; align-items: center; gap: 10px; min-width: 0; flex: 1; }
+    .node-header-info .muted { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .node-section .table-wrap { margin-top: 14px; }
     .node-strip { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
     .node-strip > a { font-size: 13px; white-space: nowrap; }
     .node-chips { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
@@ -956,7 +1003,9 @@ function styles() {
     .chat-message { max-width: 980px; border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; background: var(--panel); }
     .chat-message.user { justify-self: end; background: var(--accent-soft); border-color: var(--accent); }
     .chat-message.error { border-color: var(--bad); background: var(--bad-bg); }
-    .chat-message.system { background: var(--panel-2); }
+    .chat-message.system { background: var(--panel-2); border-left: 3px solid var(--info); max-width: 600px; }
+    .chat-message.system .chat-role { color: var(--info); }
+    .chat-message.system pre { color: var(--muted-strong); font-size: 12px; }
     .chat-role { color: var(--muted); font-size: 12px; font-weight: 700; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0; }
     .chat-message pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; color: var(--text); font: 13px/1.5 ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; }
     .chat-empty { padding: 20px; }

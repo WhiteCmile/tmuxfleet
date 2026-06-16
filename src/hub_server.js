@@ -51,6 +51,25 @@ const SMART_RECOVER_CONFIDENCE = 0.8;
 
 const connectedNodes = new Map();
 const autoRecoverHistory = new Map();
+const autoRecoverEvents = new Map();
+const AUTO_RECOVER_MAX_EVENTS = 50;
+
+function recordAutoRecoverEvent(nodeName, sessionName, { type, message, reason }) {
+  const key = `${nodeName}/${sessionName}`;
+  let events = autoRecoverEvents.get(key);
+  if (!events) {
+    events = [];
+    autoRecoverEvents.set(key, events);
+  }
+  events.push({ type, message, reason, time: Date.now() });
+  if (events.length > AUTO_RECOVER_MAX_EVENTS) {
+    events.splice(0, events.length - AUTO_RECOVER_MAX_EVENTS);
+  }
+}
+
+function getAutoRecoverEvents(nodeName, sessionName) {
+  return autoRecoverEvents.get(`${nodeName}/${sessionName}`) || [];
+}
 
 export function startHubServer({ host, port }) {
   ensureHubAuthForBind(host);
@@ -105,6 +124,7 @@ export function startHubServer({ host, port }) {
     const output = await sessionOutput(node, params.name, 2000, selectedWindow);
     const transcript = await sessionTranscript(node, params.name, 500, selectedWindow);
     const autoRecoverConfig = loadAutoRecoverSessions()[`${node.name}/${params.name}`] || null;
+    const autoRecoverEventsForSession = getAutoRecoverEvents(node.name, params.name);
     const views = await loadViews();
     sendHtml(res, 200, views.renderSessionPage({
       node,
@@ -113,7 +133,8 @@ export function startHubServer({ host, port }) {
       selectedWindow,
       output,
       transcript,
-      autoRecoverConfig
+      autoRecoverConfig,
+      autoRecoverEvents: autoRecoverEventsForSession
     }));
   }));
 
@@ -167,12 +188,14 @@ export function startHubServer({ host, port }) {
 
   app.add("GET", "/api/sessions/:node/:name/transcript-state", requireHubAuth(async ({ res, params, url }) => {
     const node = findHubNode(params.node);
-    sendJson(res, 200, await sessionTranscript(
+    const transcript = await sessionTranscript(
       node,
       params.name,
       url.searchParams.get("lines") || 500,
       url.searchParams.get("window") || ""
-    ));
+    );
+    transcript.autoRecoverEvents = getAutoRecoverEvents(params.node, params.name);
+    sendJson(res, 200, transcript);
   }));
 
   app.add("POST", "/api/sessions/:node/:name/send", requireHubAuth(async ({ res, params, body }) => {
@@ -437,6 +460,7 @@ async function scanAutoRecoverSession(nodeName, sessionName, config) {
     await sendNodeMessage(node, sessionName, message, windowIndex);
     autoRecoverHistory.set(historyKey, { ...previous, fingerprint: decision.fingerprint, sentAt: now });
     console.log(`tmuxfleet auto-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}`);
+    recordAutoRecoverEvent(nodeName, sessionName, { type: "auto-recover", message, reason: "pattern match" });
     return;
   }
   if (!config.smart) return;
@@ -470,6 +494,7 @@ async function scanAutoRecoverSession(nodeName, sessionName, config) {
     sentAt: Date.now()
   });
   console.log(`tmuxfleet smart-recover sent "${message}" to ${nodeName}/${sessionName}${windowIndex !== "" ? `:${windowIndex}` : ""}: ${review.reason || "LLM approved"}`);
+  recordAutoRecoverEvent(nodeName, sessionName, { type: "smart-recover", message, reason: review.reason || "LLM approved" });
 }
 
 async function reviewSmartRecover({ nodeName, sessionName, windowIndex, output }) {

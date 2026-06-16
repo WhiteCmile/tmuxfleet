@@ -4,7 +4,8 @@ import test from "node:test";
 import {
   chatMessagesFromOutput,
   renderSessionsPage,
-  renderSessionPage
+  renderSessionPage,
+  renderTranscriptMessages
 } from "../src/views.js";
 
 test("chatMessagesFromOutput hides agent metadata and merges continuous output", () => {
@@ -162,4 +163,42 @@ test("renderSessionPage blocks sends while the agent transcript is working", () 
   assert.match(html, /let agentWorking = true;/);
   assert.match(html, /sendButton\.disabled = sending \|\| agentWorking;/);
   assert.match(html, /if \(agentWorking\)/);
+});
+
+test("renderTranscriptMessages labels auto-recover events distinctly from user input", () => {
+  const messages = [
+    { role: "user", text: "fix the bug", time: 1000 },
+    { role: "agent", text: "Working on it...", time: 2000 }
+  ];
+  const events = [
+    { type: "auto-recover", message: "go on", reason: "pattern match", time: 3000 },
+    { type: "smart-recover", message: "go on", reason: "LLM approved", time: 4000 }
+  ];
+  const html = renderTranscriptMessages(messages, "", events);
+
+  assert.match(html, /class="chat-message user"/);
+  assert.match(html, /class="chat-message agent"/);
+  assert.match(html, /class="chat-message system"/);
+  assert.match(html, /Auto Recover/);
+  assert.match(html, /Smart Recover/);
+  assert.match(html, /pattern match/);
+  assert.match(html, /LLM approved/);
+});
+
+test("renderSessionPage embeds auto-recover events for client-side rendering", () => {
+  const html = renderSessionPage({
+    node: { name: "local", url: "http://127.0.0.1:8091" },
+    name: "test-session",
+    windows: [],
+    selectedWindow: "",
+    output: "",
+    transcript: { messages: [] },
+    autoRecoverConfig: null,
+    autoRecoverEvents: [
+      { type: "auto-recover", message: "go on", reason: "pattern match", time: 5000 }
+    ]
+  });
+
+  assert.match(html, /initialAutoRecoverEvents/);
+  assert.match(html, /auto-recover/);
 });
