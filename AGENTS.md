@@ -30,6 +30,8 @@ These instructions apply to the entire `tmuxfleet` project.
 - Use SSH for GitHub git operations in this repository. HTTPS fetch/push has
   repeatedly failed with GitHub HTTP/2 transport errors here.
 - Prefer `git@github.com:WhiteCmile/tmuxfleet.git` when fetching or pushing.
+- After finishing a coherent, verified change, commit and push it promptly
+  unless the user explicitly asks not to.
 
 ## Verification
 
