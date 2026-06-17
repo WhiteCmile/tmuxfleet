@@ -20,11 +20,13 @@ export async function transcriptState({ output = "", cli = "", panePid = 0 }) {
 export function parseCodexJsonlTranscript(text) {
   const events = [];
   const items = readJsonl(text);
-  const preferEventUsers = items.some((item) => item?.type === "event_msg" && item?.payload?.type === "user_message");
+  const preferEventStream = items.some((item) => {
+    return item?.type === "event_msg" && ["user_message", "agent_message"].includes(item?.payload?.type);
+  });
   let lineNumber = 0;
   for (const item of items) {
     lineNumber += 1;
-    const event = codexEventFromJson(item, lineNumber, { preferEventUsers });
+    const event = codexEventFromJson(item, lineNumber, { preferEventStream });
     if (event) events.push(event);
   }
   const messages = events
@@ -159,13 +161,21 @@ async function processFileDescriptors(pid) {
   }
 }
 
-function codexEventFromJson(item, lineNumber, { preferEventUsers = false } = {}) {
+function codexEventFromJson(item, lineNumber, { preferEventStream = false } = {}) {
   if (!item || typeof item !== "object") return null;
   if (item.type === "event_msg") {
     const payload = item.payload;
-    if (!payload || typeof payload !== "object" || payload.type !== "user_message") return null;
-    const text = String(payload.message || "").trim();
-    return text ? { kind: "user", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+    if (!payload || typeof payload !== "object") return null;
+    if (payload.type === "user_message") {
+      const text = String(payload.message || "").trim();
+      return text ? { kind: "user", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+    }
+    if (payload.type === "agent_message" && ["commentary", "final_answer"].includes(payload.phase)) {
+      const text = String(payload.message || "").trim();
+      const kind = payload.phase === "final_answer" ? "assistant_final" : "assistant";
+      return text ? { kind, text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+    }
+    return null;
   }
   if (item.type !== "response_item") return null;
   const payload = item.payload;
@@ -180,11 +190,12 @@ function codexEventFromJson(item, lineNumber, { preferEventUsers = false } = {})
   }
   if (payload.type !== "message") return null;
   if (payload.role === "user") {
-    if (preferEventUsers) return null;
+    if (preferEventStream) return null;
     const text = joinTextBlocks(payload.content, "input_text");
     return text ? { kind: "user", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
   }
   if (payload.role === "assistant" && ["commentary", "final_answer"].includes(payload.phase)) {
+    if (preferEventStream) return null;
     const text = joinTextBlocks(payload.content, "output_text");
     return text ? { kind: payload.phase === "final_answer" ? "assistant_final" : "assistant", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
   }

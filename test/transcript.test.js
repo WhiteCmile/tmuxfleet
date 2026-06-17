@@ -167,13 +167,12 @@ test("parseCodexJsonlTranscript ignores synthetic sub-agent user prompts when ev
       }
     }),
     JSON.stringify({
-      type: "response_item",
+      type: "event_msg",
       timestamp: "2026-06-12T01:00:01.000Z",
       payload: {
-        type: "message",
-        role: "assistant",
+        type: "agent_message",
         phase: "final_answer",
-        content: [{ type: "output_text", text: "I inspected the parser." }]
+        message: "I inspected the parser."
       }
     })
   ].join("\n");
@@ -190,6 +189,68 @@ test("parseCodexJsonlTranscript ignores synthetic sub-agent user prompts when ev
       text: "I inspected the parser.",
       time: 1781226001000,
       id: "codex:3"
+    }
+  ]);
+});
+
+test("parseCodexJsonlTranscript ignores synthetic sub-agent assistant messages when event stream exists", () => {
+  const jsonl = [
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-06-12T01:00:00.000Z",
+      payload: {
+        type: "user_message",
+        message: "use a sub-agent to inspect the parser"
+      }
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-06-12T01:00:01.000Z",
+      payload: {
+        type: "agent_message",
+        phase: "commentary",
+        message: "I am delegating parser inspection."
+      }
+    }),
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:02.000Z",
+      payload: {
+        type: "message",
+        role: "assistant",
+        phase: "commentary",
+        content: [{ type: "output_text", text: "Sub-agent internal note: transcript.js has helper functions." }]
+      }
+    }),
+    JSON.stringify({
+      type: "event_msg",
+      timestamp: "2026-06-12T01:00:03.000Z",
+      payload: {
+        type: "agent_message",
+        phase: "final_answer",
+        message: "The parser inspection is complete."
+      }
+    })
+  ].join("\n");
+
+  assert.deepEqual(parseCodexJsonlTranscript(jsonl).messages, [
+    {
+      role: "user",
+      text: "use a sub-agent to inspect the parser",
+      time: 1781226000000,
+      id: "codex:1"
+    },
+    {
+      role: "agent",
+      text: "I am delegating parser inspection.",
+      time: 1781226001000,
+      id: "codex:2"
+    },
+    {
+      role: "agent",
+      text: "The parser inspection is complete.",
+      time: 1781226003000,
+      id: "codex:4"
     }
   ]);
 });
