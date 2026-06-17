@@ -385,8 +385,8 @@ function normalizeTranscriptMessage(message) {
   if (!message || typeof message !== "object") return null;
   const text = String(message.text || "").trim();
   if (!text) return null;
-  const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
-  const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
+  const role = ["user", "agent", "session", "error"].includes(message.role) ? message.role : "agent";
+  const label = role === "user" ? "Input" : role === "session" ? "Session" : role === "error" ? "Error" : "Output";
   return { role, label, text };
 }
 
@@ -546,8 +546,8 @@ ${clientActivityCore()}
         if (!message || typeof message !== "object") return null;
         const text = String(message.text || "").trim();
         if (!text) return null;
-        const role = ["user", "agent", "session"].includes(message.role) ? message.role : "agent";
-        const label = role === "user" ? "Input" : role === "session" ? "Session" : "Output";
+        const role = ["user", "agent", "session", "error"].includes(message.role) ? message.role : "agent";
+        const label = role === "user" ? "Input" : role === "session" ? "Session" : role === "error" ? "Error" : "Output";
         return {role, label, text};
       }
 

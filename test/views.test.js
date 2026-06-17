@@ -133,6 +133,21 @@ test("renderSessionPage prefers structured transcript messages over raw output p
   assert.doesNotMatch(chatLog, /raw fallback/);
 });
 
+test("renderSessionPage renders transcript errors as error cards", () => {
+  const html = renderSessionPage({
+    node: { name: "local", url: "http://127.0.0.1:8091" },
+    name: "agent",
+    windows: [],
+    selectedWindow: "",
+    output: "",
+    transcript: { messages: [{ role: "error", text: "Process exited with code 1" }] },
+    autoRecoverConfig: null
+  });
+
+  assert.match(html, /<article class="chat-message error">/);
+  assert.match(html, /<div class="chat-role">Error<\/div>/);
+});
+
 test("renderSessionPage safely embeds transcript messages in script JSON", () => {
   const html = renderSessionPage({
     node: { name: "local", url: "http://127.0.0.1:8091" },

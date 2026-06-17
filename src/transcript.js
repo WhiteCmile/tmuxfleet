@@ -19,23 +19,25 @@ export async function transcriptState({ output = "", cli = "", panePid = 0 }) {
 
 export function parseCodexJsonlTranscript(text) {
   const events = [];
+  const items = readJsonl(text);
+  const preferEventUsers = items.some((item) => item?.type === "event_msg" && item?.payload?.type === "user_message");
   let lineNumber = 0;
-  for (const item of readJsonl(text)) {
+  for (const item of items) {
     lineNumber += 1;
-    const event = codexEventFromJson(item, lineNumber);
+    const event = codexEventFromJson(item, lineNumber, { preferEventUsers });
     if (event) events.push(event);
   }
   const messages = events
-    .filter((event) => event.kind === "user" || event.kind === "assistant_final")
+    .filter((event) => isDisplayableCodexEvent(event))
     .filter((event) => event.kind !== "user" || isMeaningfulCodexUserText(event.text))
     .map((event) => ({
-      role: event.kind === "user" ? "user" : "agent",
+      role: event.kind === "user" ? "user" : event.kind === "error" ? "error" : "agent",
       text: event.text,
       time: event.time,
       id: event.id
     }));
   const latestUser = latestEventIndex(events, "user");
-  const latestAssistant = latestEventIndex(events, "assistant_final");
+  const latestAssistant = latestCodexBlockingResponseIndex(events);
   const reply = latestAssistant >= 0 ? events[latestAssistant].text : "";
   const working = latestUser > latestAssistant;
   return transcriptPayload({
@@ -157,20 +159,97 @@ async function processFileDescriptors(pid) {
   }
 }
 
-function codexEventFromJson(item, lineNumber) {
+function codexEventFromJson(item, lineNumber, { preferEventUsers = false } = {}) {
   if (!item || typeof item !== "object") return null;
+  if (item.type === "event_msg") {
+    const payload = item.payload;
+    if (!payload || typeof payload !== "object" || payload.type !== "user_message") return null;
+    const text = String(payload.message || "").trim();
+    return text ? { kind: "user", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+  }
   if (item.type !== "response_item") return null;
   const payload = item.payload;
-  if (!payload || typeof payload !== "object" || payload.type !== "message") return null;
+  if (!payload || typeof payload !== "object") return null;
+  if (payload.type === "function_call") {
+    const text = codexPromptFromFunctionCall(payload);
+    return text ? { kind: "assistant_prompt", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+  }
+  if (payload.type === "function_call_output") {
+    const text = codexErrorFromFunctionOutput(payload);
+    return text ? { kind: "error", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+  }
+  if (payload.type !== "message") return null;
   if (payload.role === "user") {
+    if (preferEventUsers) return null;
     const text = joinTextBlocks(payload.content, "input_text");
     return text ? { kind: "user", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
   }
-  if (payload.role === "assistant" && payload.phase === "final_answer") {
+  if (payload.role === "assistant" && ["commentary", "final_answer"].includes(payload.phase)) {
     const text = joinTextBlocks(payload.content, "output_text");
-    return text ? { kind: "assistant_final", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
+    return text ? { kind: payload.phase === "final_answer" ? "assistant_final" : "assistant", text, time: eventTimeMs(item), id: `codex:${lineNumber}` } : null;
   }
   return null;
+}
+
+function isDisplayableCodexEvent(event) {
+  return ["user", "assistant", "assistant_final", "assistant_prompt", "error"].includes(event.kind);
+}
+
+function latestCodexBlockingResponseIndex(events) {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    if (["assistant_final", "assistant_prompt", "error"].includes(events[index].kind)) return index;
+  }
+  return -1;
+}
+
+function codexPromptFromFunctionCall(payload) {
+  const name = String(payload.name || "");
+  if (!/(^|[.])request_user_input$/.test(name)) return "";
+  let args = {};
+  try {
+    args = JSON.parse(String(payload.arguments || "{}"));
+  } catch {
+    return "";
+  }
+  const questions = Array.isArray(args.questions) ? args.questions : [];
+  return questions.map(formatQuestion).filter(Boolean).join("\n\n").trim();
+}
+
+function formatQuestion(question) {
+  if (!question || typeof question !== "object") return "";
+  const lines = [];
+  const prompt = String(question.question || "").trim();
+  if (prompt) lines.push(prompt);
+  const options = Array.isArray(question.options) ? question.options : [];
+  options.forEach((option, index) => {
+    if (!option || typeof option !== "object") return;
+    const label = String(option.label || "").trim();
+    const description = String(option.description || "").trim();
+    const suffix = description ? ` - ${description}` : "";
+    if (label || description) lines.push(`${index + 1}. ${label || description}${label ? suffix : ""}`);
+  });
+  return lines.join("\n").trim();
+}
+
+function codexErrorFromFunctionOutput(payload) {
+  const output = String(payload.output || "").trim();
+  if (!output || !isErrorLikeOutput(output)) return "";
+  const lines = output.split("\n").map((line) => line.trimEnd());
+  const useful = lines.filter((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) return false;
+    return !/^(Chunk ID|Wall time|Original token count|Total output lines):/i.test(trimmed);
+  });
+  return useful.slice(0, 20).join("\n").trim();
+}
+
+function isErrorLikeOutput(output) {
+  return [
+    /Process exited with code\s+[1-9]\d*/i,
+    /\b(error|failed|failure|exception|traceback|fatal)\b/i,
+    /\bE[A-Z0-9_]{3,}\b/,
+    /\b(api_retry|connection reset|connection refused|timed out|timeout|socket hang up)\b/i
+  ].some((pattern) => pattern.test(output));
 }
 
 function isMeaningfulCodexUserText(text) {
@@ -180,7 +259,8 @@ function isMeaningfulCodexUserText(text) {
     /^<environment_context>[\s\S]*<\/environment_context>$/i,
     /^<turn_aborted>[\s\S]*<\/turn_aborted>$/i,
     /^# AGENTS\.md instructions for\b/i,
-    /^<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/i
+    /^<INSTRUCTIONS>[\s\S]*<\/INSTRUCTIONS>$/i,
+    /^\/goal\b[\s\S]*/i
   ].some((pattern) => pattern.test(value));
 }
 
@@ -287,8 +367,18 @@ function claudeAssistantText(event) {
   if (typeof content === "string") return content.trim();
   if (!Array.isArray(content)) return "";
   return content.map((block) => {
-    return block?.type === "text" && typeof block.text === "string" ? block.text : "";
+    if (block?.type === "text" && typeof block.text === "string") return block.text;
+    if (block?.type === "tool_use") return claudePromptFromToolUse(block);
+    return "";
   }).filter(Boolean).join("\n\n").trim();
+}
+
+function claudePromptFromToolUse(block) {
+  const name = String(block?.name || "");
+  const input = block?.input && typeof block.input === "object" ? block.input : {};
+  if (!/(^|[.])(AskUserQuestion|request_user_input)$/i.test(name) && !Array.isArray(input.questions)) return "";
+  const questions = Array.isArray(input.questions) ? input.questions : [];
+  return questions.map(formatQuestion).filter(Boolean).join("\n\n").trim();
 }
 
 function joinTextBlocks(content, kind) {
