@@ -283,6 +283,25 @@ test("parseCodexJsonlTranscript exposes failed tool output as an error message",
   ]);
 });
 
+test("parseCodexJsonlTranscript does not treat sub-agent prose as an error", () => {
+  const jsonl = [
+    JSON.stringify({
+      type: "response_item",
+      timestamp: "2026-06-12T01:00:00.000Z",
+      payload: {
+        type: "function_call_output",
+        output: [
+          "Sub-agent review complete.",
+          "It found no blocking errors.",
+          "One optional check failed in a non-critical path."
+        ].join("\n")
+      }
+    })
+  ].join("\n");
+
+  assert.deepEqual(parseCodexJsonlTranscript(jsonl).messages, []);
+});
+
 test("parseCodexJsonlTranscript ignores Codex environment and AGENTS metadata user events", () => {
   const jsonl = [
     JSON.stringify({

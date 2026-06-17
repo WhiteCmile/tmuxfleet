@@ -257,8 +257,9 @@ function codexErrorFromFunctionOutput(payload) {
 function isErrorLikeOutput(output) {
   return [
     /Process exited with code\s+[1-9]\d*/i,
-    /\b(error|failed|failure|exception|traceback|fatal)\b/i,
-    /\bE[A-Z0-9_]{3,}\b/,
+    /(^|\n)(?:Error|TypeError|ReferenceError|SyntaxError|RangeError):\s+\S/i,
+    /(^|\n)Traceback \(most recent call last\):/i,
+    /(^|\n)fatal:\s+\S/i,
     /\b(api_retry|connection reset|connection refused|timed out|timeout|socket hang up)\b/i
   ].some((pattern) => pattern.test(output));
 }
